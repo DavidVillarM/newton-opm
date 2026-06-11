@@ -1,97 +1,114 @@
-# Newton Conducta
+# Newton OPM
 
-Plugin de WordPress para **Newton Centro de Estudios** que centraliza la gestión académica: evaluación de conducta, control de asistencia y administración de exámenes.
+**Plugin de WordPress** para gestión académica integral en instituciones educativas. Desarrollado por [David Villar](https://github.com/DavidVillarM) para Newton Centro de Estudios.
 
-## Características
+> OPM — *Oficina de Planificación y Monitoreo*: plataforma unificada para conducta, asistencia y exámenes.
 
-- **Conducta** — Registro y seguimiento de evaluaciones de conducta por alumno, con facultades, carreras, cursos, grupos y subgrupos.
-- **Asistencia** — Gestión de materias, sesiones de clase, docentes asignados y marcado de presentes/ausentes.
-- **Exámenes** — Carga e importación de exámenes (incluye soporte para archivos PDF y hojas de cálculo).
-- **Roles y permisos** — Acceso restringido por rol de WordPress (administradores, docentes, funcionarios de oficina).
-- **API REST** — Backend bajo el namespace `conducta/v1` con autenticación vía nonce de WordPress.
-- **Interfaz SPA** — Frontend en JavaScript vanilla con persistencia de estado en `sessionStorage`.
+---
+
+## Resumen para portafolio
+
+Sistema web completo embebido en WordPress que reemplaza procesos manuales con una **SPA (Single Page Application)** conectada a una **API REST** propia. Incluye control de acceso por roles, migraciones automáticas de base de datos, importación de archivos (PDF, Excel, Word) y generación de reportes en CSV/PDF.
+
+**Stack tecnológico:** PHP 7.4+ · WordPress REST API · JavaScript (vanilla) · MySQL · Composer · PHPSpreadsheet · TCPDF · PDF Parser
+
+---
+
+## Módulos principales
+
+| Módulo | Funcionalidad |
+|--------|---------------|
+| **Conducta** | Evaluación individual y grupal de alumnos; facultades, carreras, cursos y grupos |
+| **Asistencia** | Materias, sesiones de clase, docentes asignados y registro de presentes |
+| **Exámenes** | Carga masiva e importación desde PDF y hojas de cálculo |
+| **Reportes** | Exportación CSV y PDF de rendimiento por alumno, aula y curso |
+| **Roles** | Permisos diferenciados: administrador, docente y funcionario de oficina |
+
+---
+
+## Destacados técnicos
+
+- **+5.000 líneas** de API REST en PHP con endpoints CRUD completos
+- **Migraciones de esquema** versionadas que se aplican sin reactivar el plugin
+- **Estado de sesión** en el frontend (`sessionStorage`) para restaurar navegación y modales
+- **Anti-caché** en respuestas REST para entornos con CDN (Hostinger, LiteSpeed, Cloudflare)
+- **Importación inteligente** de exámenes con parsing de PDF y hojas de cálculo
+
+---
 
 ## Requisitos
 
 - WordPress 5.8+
 - PHP 7.4 o superior
-- [Composer](https://getcomposer.org/) (para instalar dependencias PHP)
-- MySQL / MariaDB (tablas creadas automáticamente al activar el plugin)
+- [Composer](https://getcomposer.org/)
+- MySQL / MariaDB
+
+---
 
 ## Instalación
 
-1. Clona el repositorio en la carpeta de plugins de WordPress:
+```bash
+git clone https://github.com/DavidVillarM/newton-opm.git wp-content/plugins/newton-opm
+cd wp-content/plugins/newton-opm
+composer install --no-dev
+```
 
-   ```bash
-   git clone https://github.com/DavidVillarM/newton-conducta.git wp-content/plugins/newton-conducta
-   ```
-
-2. Instala las dependencias PHP:
-
-   ```bash
-   cd wp-content/plugins/newton-conducta
-   composer install --no-dev
-   ```
-
-3. Activa el plugin desde **Plugins → Plugins instalados** en el panel de WordPress.
-
-4. Crea una página con el slug `conducta` u `opm` e inserta el shortcode:
+1. Activa el plugin en **Plugins → Plugins instalados**.
+2. Crea una página con slug `opm` e inserta el shortcode:
 
    ```
-   [newton_conducta_app]
+   [newton_opm_app]
    ```
 
-5. Asigna los roles de WordPress necesarios a los usuarios que deban acceder al sistema.
+3. Asigna los roles de WordPress a los usuarios autorizados.
+
+> El shortcode `[newton_conducta_app]` y la página con slug `conducta` siguen funcionando por compatibilidad.
+
+---
 
 ## Estructura del proyecto
 
 ```
-newton-conducta/
-├── newton-conducta.php      # Punto de entrada del plugin
-├── includes/                # Clases PHP (REST, base de datos, roles, importación)
-├── assets/dist/             # Frontend compilado (JS y CSS)
-├── composer.json            # Dependencias PHP
-└── vendor/                  # Dependencias instaladas por Composer (no versionadas)
+newton-opm/
+├── newton-opm.php           # Punto de entrada del plugin
+├── includes/                # Backend PHP (REST, DB, roles, importación)
+├── assets/dist/             # Frontend SPA (JS + CSS)
+├── composer.json
+└── vendor/                  # Dependencias (no versionadas; instalar con Composer)
 ```
 
-## Dependencias principales
-
-| Paquete | Uso |
-|---------|-----|
-| `phpoffice/phpspreadsheet` | Importación y exportación de hojas de cálculo |
-| `tecnickcom/tcpdf` | Generación de documentos PDF |
-| `phpoffice/phpword` | Procesamiento de documentos Word |
-| `smalot/pdfparser` | Lectura y análisis de archivos PDF |
+---
 
 ## API REST
 
-La API está disponible en:
+Base URL: `/wp-json/conducta/v1/`
 
-```
-/wp-json/conducta/v1/
-```
-
-Algunos endpoints principales:
-
-| Módulo | Ejemplos de rutas |
-|--------|-------------------|
+| Área | Rutas de ejemplo |
+|------|------------------|
 | Conducta | `/facultades`, `/carreras`, `/alumnos`, `/evaluaciones` |
 | Asistencia | `/asistencia/materias`, `/asistencia/sesiones` |
 | Exámenes | `/examenes/...` |
 
-Todas las rutas requieren usuario autenticado con permisos válidos.
-
-## Desarrollo
-
-El frontend vive en `assets/dist/`. Si modificas los archivos fuente, recompílalos y actualiza los bundles en esa carpeta antes de desplegar.
-
-Las migraciones de base de datos se ejecutan automáticamente al cargar el plugin cuando cambia la versión del esquema.
+---
 
 ## Autor
 
-**David Villar** — [GitHub](https://github.com/DavidVillarM)
+**David Villar** — Estudiante de Ingeniería en Informática
 
-Desarrollado para Newton Centro de Estudios.
+- GitHub: [@DavidVillarM](https://github.com/DavidVillarM)
+- LinkedIn: [in/davidvillarm](https://www.linkedin.com/in/davidvillarm)
+
+---
+
+## Texto sugerido para LinkedIn
+
+Puedes copiar y adaptar esto en la sección **Proyectos** de tu perfil:
+
+> **Newton OPM** — Plugin WordPress para gestión académica integral (conducta, asistencia y exámenes). Desarrollé una SPA en JavaScript conectada a una API REST en PHP con control de roles, migraciones de BD, importación de PDF/Excel y generación de reportes. Stack: PHP, WordPress, JavaScript, MySQL, Composer.
+>
+> Repositorio: github.com/DavidVillarM/newton-opm
+
+---
 
 ## Licencia
 

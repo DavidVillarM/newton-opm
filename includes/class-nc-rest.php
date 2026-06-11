@@ -3917,7 +3917,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       // fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
       // Información del alumno
-      fputcsv($output, ['Reporte de Rendimiento - Newton Conducta']);
+      fputcsv($output, ['Reporte de Rendimiento - Newton OPM']);
       fputcsv($output, ['']);
       fputcsv($output, ['Alumno', $alumno['nombres'] . ' ' . $alumno['apellidos']]);
       fputcsv($output, ['CI', $alumno['ci']]);
@@ -4033,7 +4033,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $output = fopen('php://output', 'w');
       fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-      fputcsv($output, ['Reporte de Rendimiento por Aula - Newton Conducta']);
+      fputcsv($output, ['Reporte de Rendimiento por Aula - Newton OPM']);
       fputcsv($output, ['']);
       fputcsv($output, ['Aula', $aula['aula_nombre']]);
       fputcsv($output, ['Curso', $aula['curso_nombre'] ?? 'N/A']);
@@ -4148,7 +4148,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $output = fopen('php://output', 'w');
       fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-      fputcsv($output, ['Reporte de Rendimiento por Curso - Newton Conducta']);
+      fputcsv($output, ['Reporte de Rendimiento por Curso - Newton OPM']);
       fputcsv($output, ['']);
       fputcsv($output, ['Curso', $curso['curso_nombre']]);
       fputcsv($output, ['Fecha de Reporte', date('Y-m-d H:i:s')]);
@@ -4378,7 +4378,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       }
       
       $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8');
-      $pdf->SetCreator('Newton Conducta');
+      $pdf->SetCreator('Newton OPM');
       $pdf->SetTitle('Rendimiento de Alumno');
       $pdf->setPrintHeader(false);
       $pdf->setPrintFooter(false);
@@ -4452,7 +4452,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $alumnos = $data['alumnos'];
       
       $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8');
-      $pdf->SetCreator('Newton Conducta');
+      $pdf->SetCreator('Newton OPM');
       $pdf->SetTitle('Rendimiento Aula - ' . $aula['aula_nombre']);
       $pdf->setPrintHeader(false);
       $pdf->setPrintFooter(false);
@@ -4502,7 +4502,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $alumnos = $data['alumnos'];
       
       $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8');
-      $pdf->SetCreator('Newton Conducta');
+      $pdf->SetCreator('Newton OPM');
       $pdf->SetTitle('Rendimiento Curso - ' . $curso['curso_nombre']);
       $pdf->setPrintHeader(false);
       $pdf->setPrintFooter(false);
@@ -4633,7 +4633,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $output = fopen('php://output', 'w');
       fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-      fputcsv($output, ['Reporte General de Rendimiento - Newton Conducta']);
+      fputcsv($output, ['Reporte General de Rendimiento - Newton OPM']);
       fputcsv($output, ['']);
       fputcsv($output, ['Fecha de Reporte', date('Y-m-d H:i:s')]);
       fputcsv($output, ['Total de Alumnos', count($alumnos)]);
@@ -4717,7 +4717,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
           }
           
           $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8'); // Landscape
-          $pdf->SetCreator('Newton Conducta');
+          $pdf->SetCreator('Newton OPM');
           $pdf->SetTitle('Reporte General');
           $pdf->setPrintHeader(false);
           $pdf->setPrintFooter(false);
@@ -4919,7 +4919,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       }
       
       $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8'); // Landscape
-      $pdf->SetCreator('Newton Conducta');
+      $pdf->SetCreator('Newton OPM');
       $pdf->SetTitle('Reporte de Conducta por Fecha');
       $pdf->setPrintHeader(false);
       $pdf->setPrintFooter(false);

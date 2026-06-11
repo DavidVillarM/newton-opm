@@ -1,9 +1,10 @@
 <?php
 /**
- * Plugin Name: Newton Conducta
- * Description: Sistema de evaluación de conducta para Newton (alumnos, evaluaciones).
+ * Plugin Name: Newton OPM
+ * Description: Sistema integral de gestión académica para Newton: conducta, asistencia y exámenes.
  * Version: 0.1.0
- * Author: Newton
+ * Author: David Villar
+ * Author URI: https://github.com/DavidVillarM
  */
 
 if (!defined('ABSPATH')) exit;

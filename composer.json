@@ -1,6 +1,6 @@
 {
-  "name": "newton/conducta",
-  "description": "Sistema de evaluación de conducta para Newton Centro de Estudios",
+  "name": "newton/opm",
+  "description": "Sistema integral de gestión académica (OPM) para Newton Centro de Estudios",
   "type": "wordpress-plugin",
   "version": "0.2.0",
   "require": {
@@ -17,7 +17,7 @@
   },
   "authors": [
     {
-      "name": "Newton Centro de Estudios"
+      "name": "David Villar"
     }
   ],
   "license": "proprietary"

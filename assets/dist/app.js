@@ -1,5 +1,5 @@
 (async function () {
-  const root = document.getElementById('conducta-root');
+  const root = document.getElementById('opm-root');
   if (!root) return;
 
   // Soporta apiUrl relativo o absoluto
@@ -513,7 +513,7 @@
           const style = document.createElement('style');
           style.id = 'nc-loader-styles';
           style.textContent = `
-            #conducta-root.nc-loading .nc-wrap { visibility: hidden; }
+            #opm-root.nc-loading .nc-wrap { visibility: hidden; }
             .nc-loading-overlay { position: fixed; inset: 0; background: rgba(245,245,245,0.98); display: flex; align-items: center; justify-content: center; z-index: 99998; }
             .nc-loading-overlay .typewriter { --blue: #5C86FF; --blue-dark: #275EFE; --key: #fff; --paper: #EEF0FD; --text: #D3D4EC; --tool: #FBC56C; --duration: 3s; position: relative; animation: nc-bounce05 var(--duration) linear infinite; }
             .nc-loading-overlay .typewriter .slide { width: 92px; height: 20px; border-radius: 3px; margin-left: 14px; transform: translateX(14px); background: linear-gradient(var(--blue), var(--blue-dark)); animation: nc-slide05 var(--duration) ease infinite; }
@@ -1685,7 +1685,7 @@
   wrap.appendChild(el('div', { id: 'nc-toast' }));
   wrap.appendChild(el('div', { class: 'nc-head' }, `
     <div>
-      <h2 style="margin:0">Newton Conducta</h2>
+      <h2 style="margin:0">Newton OPM</h2>
       <div id="nc-status" style="margin-top:4px;color:#666;font-size:13px"></div>
     </div>
   `));

@@ -4,7 +4,8 @@ if (!defined('ABSPATH')) exit;
 class NC_Shortcode {
 
   public static function init() {
-    add_shortcode('newton_conducta_app', [__CLASS__, 'render']);
+    add_shortcode('newton_opm_app', [__CLASS__, 'render']);
+    add_shortcode('newton_conducta_app', [__CLASS__, 'render']); // alias legacy
 
     add_action('wp_enqueue_scripts', function () {
       if (!is_page()) return;
@@ -12,8 +13,8 @@ class NC_Shortcode {
       global $post;
       if (!$post) return;
 
-      // Cargar en la página donde está el shortcode (slug "conducta" o "opm")
-      $allowed_slugs = ['conducta', 'opm'];
+      // Cargar en la página donde está el shortcode (slug "opm" o legacy "conducta")
+      $allowed_slugs = ['opm', 'conducta'];
       if (!in_array($post->post_name, $allowed_slugs, true)) return;
 
       // Bloquear acceso a nivel servidor (página)
@@ -59,6 +60,6 @@ class NC_Shortcode {
   public static function render() {
     // Bloquear acceso (shortcode también)
     NC_Roles::enforce_access_or_die();
-    return '<div id="conducta-root"></div>';
+    return '<div id="opm-root"></div>';
   }
 }

@@ -797,10 +797,6 @@ class NC_Rest_Asistencia {
     $presentes = array_sum(array_column($items, 'asistio'));
     $row['presentes_total'] = $presentes . '/' . $total;
     self::apply_simulacro_sesion_display($row);
-    // #region agent log
-    $log_path_get = 'c:\\Users\\DaviM\\Downloads\\newton-conducta (8)\\.cursor\\debug.log';
-    @file_put_contents($log_path_get, json_encode(['location'=>'get_sesion:items','message'=>'get_sesion ítems devueltos','data'=>['id'=>$id,'itemsCount'=>$total,'presentesSum'=>$presentes,'presentes_total'=>$presentes.'/'.$total],'timestamp'=>round(microtime(true)*1000),'hypothesisId'=>'H'])."\n", FILE_APPEND | LOCK_EX);
-    // #endregion
     return self::ok($row);
   }
 
@@ -946,11 +942,7 @@ class NC_Rest_Asistencia {
       return self::err('No tiene permiso para editar esta asistencia', 403);
     }
 
-    // #region agent log
     $raw = $req->get_body();
-    $log_path = 'c:\\Users\\DaviM\\Downloads\\newton-conducta (8)\\.cursor\\debug.log';
-    @file_put_contents($log_path, json_encode(['location'=>'update_sesion:entry','message'=>'update_sesion llamado','data'=>['id'=>$id,'rawLen'=>is_string($raw)?strlen($raw):0,'rawPreview'=>is_string($raw)?substr($raw,0,120):''],'timestamp'=>round(microtime(true)*1000),'hypothesisId'=>'D'])."\n", FILE_APPEND | LOCK_EX);
-    // #endregion
 
     // Leer body crudo primero (evitar que parse_str corrompa JSON largo en form-urlencoded)
     $p = [];
