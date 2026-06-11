@@ -1,3 +1,5 @@
+![Newton OPM — Gestión Académica Integral](assets/newton-opm-banner.png)
+
 # Newton OPM
 
 **Plugin de WordPress** para gestión académica integral en instituciones educativas. Desarrollado por [David Villar](https://github.com/DavidVillarM) para Newton Centro de Estudios.
