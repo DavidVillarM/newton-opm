@@ -1,0 +1,23 @@
+# Dependencias (instalar con: composer install --no-dev)
+/vendor/
+
+# Entorno local
+.env
+.env.*
+
+# IDE y herramientas
+.cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs y caché
+*.log
+npm-debug.log*

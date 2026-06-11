@@ -1,0 +1,24 @@
+{
+  "name": "newton/conducta",
+  "description": "Sistema de evaluación de conducta para Newton Centro de Estudios",
+  "type": "wordpress-plugin",
+  "version": "0.2.0",
+  "require": {
+    "php": ">=7.4",
+    "phpoffice/phpspreadsheet": "^1.29",
+    "tecnickcom/tcpdf": "^6.7",
+    "phpoffice/phpword": "^1.4",
+    "smalot/pdfparser": "^2.12"
+  },
+  "autoload": {
+    "psr-4": {
+      "Newton\\Conducta\\": "includes/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Newton Centro de Estudios"
+    }
+  ],
+  "license": "proprietary"
+}
