@@ -2675,10 +2675,11 @@
     const card = el('div', { class: 'nc-card' });
     card.innerHTML = `
       <h3 style="margin:0 0 6px">Asignación masiva</h3>
-      <p style="margin:0 0 20px;color:#666;font-size:14px">Configurar materias por curso (auto-inscripción) e inscribir estudiantes en materias (casos especiales). También podés agregar alumnos a grupos.</p>
+      <p style="margin:0 0 20px;color:#666;font-size:14px">Configurar materias por curso (auto-inscripción) e inscribir estudiantes en materias (casos especiales). También podés agregar, desvincular o mover alumnos entre grupos.</p>
       <div class="nc-tabs" style="margin-bottom:16px">
         <button type="button" class="nc-tab" data-am-sub="curso-materias" data-active="1">Materias por curso</button>
         <button type="button" class="nc-tab" data-am-sub="subgrupos" data-active="0">Agregar a grupos</button>
+        <button type="button" class="nc-tab" data-am-sub="desvincular-grupos" data-active="0">Desvincular / mover</button>
         ${''}
         <button type="button" class="nc-tab" data-am-sub="materias" data-active="0">Inscribir en Materias</button>
         <button type="button" class="nc-tab" data-am-sub="materias-grupo" data-active="0">Materias por grupo</button>
@@ -2720,6 +2721,33 @@
           <table><thead><tr><th><input type="checkbox" id="am_sg_select_all" title="Seleccionar todos" /></th><th>Nombre</th><th>CI</th><th>Grupo (actual)</th><th>Curso</th><th>Carrera</th><th>Facultad</th></tr></thead><tbody id="am_sg_tbody"></tbody></table>
         </div>
         <p id="am_sg_msg" style="margin:12px 0 0;color:#666;font-size:13px">Elegí el grupo destino, escribí el criterio de búsqueda y presioná Cargar alumnos.</p>
+      </div>
+      <div id="am_desvincular_panel" class="nc-card" style="margin-top:0;padding:16px;display:none">
+        <h4 style="margin:0 0 12px">Desvincular alumnos de un grupo o moverlos a otro</h4>
+        <p style="margin:0 0 16px;color:#666;font-size:13px">Seleccioná el grupo del que querés quitar alumnos. Podés desvincularlos únicamente o, opcionalmente, asignarlos de inmediato a otro grupo existente.</p>
+        <div class="nc-row" style="flex-wrap:wrap;gap:12px;margin-bottom:12px">
+          <div class="nc-field"><label>Grupo origen</label><select id="am_dv_aula_origen">${aulasOptions(false)}</select></div>
+          <div class="nc-field"><label>Grupo destino (opcional)</label><select id="am_dv_aula_destino">${aulasOptions(true)}</select></div>
+          <button class="nc-btn" id="am_dv_cargar" style="align-self:flex-end">Cargar alumnos</button>
+        </div>
+        <div class="nc-row" style="flex-wrap:wrap;gap:12px;margin-bottom:8px">
+          <div class="nc-field" style="flex:1;min-width:220px">
+            <label>Buscar (nombre o CI)</label>
+            <input id="am_dv_search" placeholder="Ej: Juan / 1234567" />
+          </div>
+          <div class="nc-field">
+            <label>Ordenar por</label>
+            <select id="am_dv_order_by">
+              <option value="apellidos" selected>Apellido</option>
+              <option value="nombres">Nombre</option>
+            </select>
+          </div>
+        </div>
+        <div id="am_dv_bulk" style="display:none;margin-bottom:12px"></div>
+        <div style="overflow:auto;max-height:320px">
+          <table><thead><tr><th><input type="checkbox" id="am_dv_select_all" title="Seleccionar todos" /></th><th>Nombre</th><th>CI</th><th>Grupos actuales</th><th>Curso</th><th>Carrera</th><th>Facultad</th></tr></thead><tbody id="am_dv_tbody"></tbody></table>
+        </div>
+        <p id="am_dv_msg" style="margin:12px 0 0;color:#666;font-size:13px">Elegí el grupo origen y presioná Cargar alumnos para ver quiénes pertenecen a ese grupo.</p>
       </div>
       ${userPermissions.isAdmin() ? `
       <div id="am_subgrupos_config_panel" class="nc-card" style="margin-top:0;padding:16px;display:none">
@@ -3011,6 +3039,8 @@
         card.querySelectorAll('[data-am-sub]').forEach(b => b.dataset.active = (b.getAttribute('data-am-sub') === sub ? '1' : '0'));
         document.getElementById('am_curso_materias_panel').style.display = sub === 'curso-materias' ? 'block' : 'none';
         document.getElementById('am_subgrupos_panel').style.display = sub === 'subgrupos' ? 'block' : 'none';
+        const dvPanel = document.getElementById('am_desvincular_panel');
+        if (dvPanel) dvPanel.style.display = sub === 'desvincular-grupos' ? 'block' : 'none';
         const cfgPanel = document.getElementById('am_subgrupos_config_panel');
         if (cfgPanel) cfgPanel.style.display = sub === 'subgrupos-config' ? 'block' : 'none';
         document.getElementById('am_materias_panel').style.display = sub === 'materias' ? 'block' : 'none';
@@ -3077,10 +3107,12 @@
     };
 
     let amSgRows = [];
+    let amDvRows = [];
     let amMatRows = [];
     let amCurRows = [];
     let amMatInscritos = {};
     let amSgSelected = new Set();
+    let amDvSelected = new Set();
     let amCurSelected = new Set();
     let amMatSelected = new Set();
     let amMatMateriaSet = new Set();
@@ -3250,6 +3282,159 @@
       }, { loadingText: 'Guardando...' });
     }
 
+    // --------- Desvincular / mover alumnos de grupo ----------
+    function sortAmDvRows(rows) {
+      const sortSel = document.getElementById('am_dv_order_by');
+      const sortBy = (sortSel && sortSel.value) ? sortSel.value : 'apellidos';
+      const primary = sortBy === 'nombres' ? 'nombres' : 'apellidos';
+      const secondary = sortBy === 'nombres' ? 'apellidos' : 'nombres';
+      return rows.slice().sort((a, b) => {
+        const va = String(a[primary] || '').toLocaleLowerCase('es');
+        const vb = String(b[primary] || '').toLocaleLowerCase('es');
+        const cmp = va.localeCompare(vb, 'es', { sensitivity: 'base' });
+        if (cmp !== 0) return cmp;
+        const va2 = String(a[secondary] || '').toLocaleLowerCase('es');
+        const vb2 = String(b[secondary] || '').toLocaleLowerCase('es');
+        return va2.localeCompare(vb2, 'es', { sensitivity: 'base' });
+      });
+    }
+
+    function renderAmDvTable() {
+      const tbody = document.getElementById('am_dv_tbody');
+      if (!tbody) return;
+      const searchEl = document.getElementById('am_dv_search');
+      const msgEl = document.getElementById('am_dv_msg');
+      const wrapDiv = tbody.closest('div');
+      const term = (searchEl && searchEl.value ? searchEl.value : '').toLowerCase().trim();
+      let rows = amDvRows || [];
+      if (term) {
+        rows = rows.filter(a => {
+          const nombre = ((a.nombres || '') + ' ' + (a.apellidos || '')).toLowerCase();
+          const ci = String(a.ci || '').toLowerCase();
+          return nombre.includes(term) || ci.includes(term);
+        });
+      }
+      rows = sortAmDvRows(rows);
+      tbody.innerHTML = rows.length ? rows.map(a => {
+        const id = Number(a.id);
+        const checked = amDvSelected.has(id) ? ' checked' : '';
+        return `<tr><td class="nc-checkbox-cell"><input type="checkbox" class="am_dv_cb" data-id="${id}"${checked} /></td>
+        <td>${escapeHtml((a.nombres || '') + ' ' + (a.apellidos || ''))}</td><td>${escapeHtml(a.ci || '')}</td>
+        <td>${escapeHtml(a.aula_nombre || '')}</td><td>${escapeHtml(a.curso_nombre || '')}</td><td>${escapeHtml(a.carrera_nombre || '')}</td><td>${escapeHtml(a.facultad_nombre || '')}</td></tr>`;
+      }).join('') : '<tr><td colspan="7" style="color:#666">No hay alumnos que coincidan con la búsqueda.</td></tr>';
+      if (msgEl) msgEl.style.display = amDvRows.length ? 'none' : 'block';
+      toggleAmDvBulk();
+      const selAll = document.getElementById('am_dv_select_all');
+      if (selAll && rows.length) {
+        const allIds = rows.map(a => Number(a.id));
+        selAll.checked = allIds.length > 0 && allIds.every(id => amDvSelected.has(id));
+      }
+      if (wrapDiv) wrapDiv.style.display = amDvRows.length ? 'block' : 'none';
+    }
+
+    function toggleAmDvBulk() {
+      const n = amDvSelected.size;
+      const bulk = document.getElementById('am_dv_bulk');
+      if (!bulk) return;
+      bulk.style.display = n ? 'block' : 'none';
+      const destSel = document.getElementById('am_dv_aula_destino');
+      const destId = destSel && destSel.value ? destSel.value : '';
+      let html = `<button type="button" class="nc-btn secondary" id="am_dv_desvincular">Desvincular ${n} seleccionado(s) del grupo</button>`;
+      if (destId) {
+        html += ` <button type="button" class="nc-btn" id="am_dv_mover">Mover ${n} seleccionado(s) al grupo destino</button>`;
+      }
+      bulk.innerHTML = html;
+
+      const btnDesv = document.getElementById('am_dv_desvincular');
+      if (btnDesv) btnDesv.onclick = withButtonLock(btnDesv, () => runAmDvAction(false), { loadingText: 'Desvinculando...' });
+
+      const btnMover = document.getElementById('am_dv_mover');
+      if (btnMover) btnMover.onclick = withButtonLock(btnMover, () => runAmDvAction(true), { loadingText: 'Moviendo...' });
+    }
+
+    async function runAmDvAction(withMove) {
+      const origenId = document.getElementById('am_dv_aula_origen').value;
+      const destId = document.getElementById('am_dv_aula_destino').value;
+      const ids = Array.from(amDvSelected);
+      if (!ids.length) return;
+      if (!origenId) { toast('Seleccioná el grupo origen.', 'err'); return; }
+      if (withMove) {
+        if (!destId) { toast('Seleccioná el grupo destino para mover alumnos.', 'err'); return; }
+        if (String(destId) === String(origenId)) { toast('El grupo destino debe ser distinto al origen.', 'err'); return; }
+      }
+      const origenNombre = (document.getElementById('am_dv_aula_origen').selectedOptions[0] || {}).text || 'grupo origen';
+      const destNombre = withMove ? ((document.getElementById('am_dv_aula_destino').selectedOptions[0] || {}).text || 'grupo destino') : '';
+      const msg = withMove
+        ? `¿Mover ${ids.length} alumno(s) de "${origenNombre}" a "${destNombre}"?`
+        : `¿Desvincular ${ids.length} alumno(s) del grupo "${origenNombre}"?`;
+      if (!confirm(msg)) return;
+
+      setLoading(true);
+      try {
+        await api('/alumnos/bulk-aula-remove', {
+          method: 'POST',
+          body: JSON.stringify({ aula_id: Number(origenId), alumno_ids: ids }),
+        });
+        if (withMove) {
+          await api('/alumnos/bulk-aula-add', {
+            method: 'POST',
+            body: JSON.stringify({ aula_id: Number(destId), alumno_ids: ids }),
+          });
+          toast(ids.length + ' alumno(s) movidos al grupo destino.');
+        } else {
+          toast(ids.length + ' alumno(s) desvinculados del grupo.');
+        }
+        amDvSelected = new Set();
+        document.getElementById('am_dv_cargar').click();
+      } catch (e) {
+        toast('Error: ' + (e.message || e), 'err');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    const amDvSearch = document.getElementById('am_dv_search');
+    if (amDvSearch) amDvSearch.addEventListener('input', () => renderAmDvTable());
+    const amDvOrderSel = document.getElementById('am_dv_order_by');
+    if (amDvOrderSel) amDvOrderSel.addEventListener('change', () => renderAmDvTable());
+    const amDvDestSel = document.getElementById('am_dv_aula_destino');
+    if (amDvDestSel) amDvDestSel.addEventListener('change', () => toggleAmDvBulk());
+
+    const amDvCargarBtn = document.getElementById('am_dv_cargar');
+    if (amDvCargarBtn) {
+      amDvCargarBtn.onclick = withButtonLock(amDvCargarBtn, async () => {
+        const aula_id = document.getElementById('am_dv_aula_origen').value;
+        if (!aula_id) { toast('Seleccioná el grupo origen.', 'err'); return; }
+        setLoading(true);
+        try {
+          const orderBy = (document.getElementById('am_dv_order_by') || {}).value || 'apellidos';
+          const rows = await api('/alumnos?aula_id=' + encodeURIComponent(aula_id) + '&order_by=' + encodeURIComponent(orderBy) + '&order=ASC');
+          amDvRows = Array.isArray(rows) ? rows : (rows && rows.items ? rows.items : []);
+          amDvSelected = new Set();
+          renderAmDvTable();
+          if (!amDvRows.length) {
+            toast('No hay alumnos en ese grupo.', 'err');
+          }
+        } catch (e) {
+          toast('Error: ' + e.message, 'err');
+        } finally {
+          setLoading(false);
+        }
+      });
+    }
+
+    const amDvSelectAll = document.getElementById('am_dv_select_all');
+    if (amDvSelectAll) {
+      amDvSelectAll.onchange = function() {
+        card.querySelectorAll('.am_dv_cb').forEach(cb => {
+          cb.checked = this.checked;
+          const id = Number(cb.getAttribute('data-id'));
+          if (this.checked) amDvSelected.add(id); else amDvSelected.delete(id);
+        });
+        toggleAmDvBulk();
+      };
+    }
+
     // --------- Asignar cursos masivamente ----------
     const amCurSearch = document.getElementById('am_cur_search');
     if (amCurSearch) amCurSearch.addEventListener('input', () => renderAmCurTable());
@@ -3409,6 +3594,11 @@
         const id = Number(e.target.getAttribute('data-id'));
         if (e.target.checked) amSgSelected.add(id); else amSgSelected.delete(id);
         toggleAmSgBulk();
+      }
+      if (e.target && e.target.classList.contains('am_dv_cb')) {
+        const id = Number(e.target.getAttribute('data-id'));
+        if (e.target.checked) amDvSelected.add(id); else amDvSelected.delete(id);
+        toggleAmDvBulk();
       }
     });
 

@@ -247,6 +247,13 @@ class NC_Rest {
       'permission_callback' => [__CLASS__, 'can_access'],
     ]);
 
+    // -------- Desvincular masivamente alumnos de un grupo (aula) --------
+    register_rest_route($ns, '/alumnos/bulk-aula-remove', [
+      'methods'             => WP_REST_Server::CREATABLE,
+      'callback'            => [__CLASS__, 'bulk_remove_alumnos_aula'],
+      'permission_callback' => [__CLASS__, 'can_access'],
+    ]);
+
     // -------- Asignación masiva de facultad/carrera a alumnos --------
     register_rest_route($ns, '/alumnos/bulk-facultad-carrera', [
       'methods'             => WP_REST_Server::CREATABLE,
@@ -5193,14 +5200,15 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $t_aul WHERE id=%d AND activo=1 LIMIT 1", $aula_id));
       if (!$exists) return self::err('Aula/grupo no encontrado o inactivo.', 404);
 
-      $placeholders = implode(',', array_fill(0, count($ids), '(%d,%d)'));
+      $placeholders = implode(',', array_fill(0, count($ids), '(%d,%d,1)'));
       $params = [];
       foreach ($ids as $aid) {
         $params[] = $aid;
         $params[] = $aula_id;
       }
 
-      $sql = "INSERT IGNORE INTO $t_al_a (alumno_id, aula_id) VALUES $placeholders";
+      $sql = "INSERT INTO $t_al_a (alumno_id, aula_id, activo) VALUES $placeholders
+              ON DUPLICATE KEY UPDATE activo=1";
       $prepared = $wpdb->prepare($sql, $params);
       $res = $wpdb->query($prepared);
 
@@ -5228,9 +5236,91 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     }
 
     /**
+     * Desvincula masivamente alumnos de un grupo/aula (marca activo=0 en la relación).
+     * POST /alumnos/bulk-aula-remove
+     * Body: { aula_id: 1, alumno_ids: [1,2,3] }
+     */
+    public static function bulk_remove_alumnos_aula(WP_REST_Request $req) {
+      if (!NC_Roles::user_is_admin()) {
+        return self::err('No tienes permisos para desvincular alumnos de grupos.', 403);
+      }
+      global $wpdb;
+      $t_al   = $wpdb->prefix . 'conducta_alumnos';
+      $t_aul  = $wpdb->prefix . 'conducta_aulas';
+      $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+      $has_rel_a = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+
+      $p = self::json_params($req);
+      $aula_id = self::int_or_null($p['aula_id'] ?? null);
+      $ids = isset($p['alumno_ids']) && is_array($p['alumno_ids']) ? array_map('intval', $p['alumno_ids']) : [];
+
+      if (!$aula_id || $aula_id <= 0) return self::err('aula_id es obligatorio.', 400);
+      $ids = array_values(array_filter($ids, fn($v) => is_int($v) && $v > 0));
+      if (empty($ids)) return self::err('Debe indicar al menos un alumno.', 400);
+
+      $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $t_aul WHERE id=%d AND activo=1 LIMIT 1", $aula_id));
+      if (!$exists) return self::err('Aula/grupo no encontrado o inactivo.', 404);
+
+      $updated = 0;
+      if ($has_rel_a) {
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $params = array_merge([$aula_id], $ids);
+        $sql = "UPDATE $t_al_a SET activo=0 WHERE aula_id=%d AND alumno_id IN ($placeholders) AND activo=1";
+        $res = $wpdb->query($wpdb->prepare($sql, $params));
+        if ($res === false) {
+          return self::db_fail('No se pudo desvincular a los alumnos del grupo.');
+        }
+        $updated = (int) $res;
+
+        foreach ($ids as $aid) {
+          $legacy_aula = (int) $wpdb->get_var($wpdb->prepare("SELECT aula_id FROM $t_al WHERE id=%d LIMIT 1", $aid));
+          if ($legacy_aula !== $aula_id) {
+            continue;
+          }
+          $new_aula = $wpdb->get_var($wpdb->prepare(
+            "SELECT ag.aula_id
+             FROM $t_al_a ag
+             INNER JOIN $t_aul au ON au.id=ag.aula_id
+             WHERE ag.alumno_id=%d AND ag.activo=1 AND au.activo=1
+             ORDER BY au.nombre ASC
+             LIMIT 1",
+            $aid
+          ));
+          $new_aula = $new_aula ? (int) $new_aula : null;
+          $data = ['aula_id' => $new_aula];
+          $fmt  = ['%d'];
+          if (self::table_has_column($t_al, 'grupo_id')) {
+            $data['grupo_id'] = $new_aula;
+            $fmt[] = '%d';
+          }
+          $wpdb->update($t_al, $data, ['id' => $aid], $fmt, ['%d']);
+        }
+      } else {
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $params = array_merge([$aula_id], $ids);
+        $sets = ['aula_id=NULL'];
+        if (self::table_has_column($t_al, 'grupo_id')) {
+          $sets[] = 'grupo_id=NULL';
+        }
+        $sql = "UPDATE $t_al SET " . implode(',', $sets) . " WHERE aula_id=%d AND id IN ($placeholders) AND activo=1";
+        $res = $wpdb->query($wpdb->prepare($sql, $params));
+        if ($res === false) {
+          return self::db_fail('No se pudo desvincular a los alumnos del grupo.');
+        }
+        $updated = (int) $res;
+      }
+
+      return self::ok([
+        'updated' => $updated,
+        'aula_id' => $aula_id,
+        'alumno_ids' => $ids,
+      ]);
+    }
+
+    /**
      * Asigna masivamente facultad y/o carrera a alumnos.
      */
-    public static function bulk_update_alumnos_facultad_carrera(WP_REST_Request $req) {
+public static function bulk_update_alumnos_facultad_carrera(WP_REST_Request $req) {
       if (!NC_Roles::user_is_admin()) {
         return self::err('No tienes permisos para asignar facultad/carrera masivamente.', 403);
       }
