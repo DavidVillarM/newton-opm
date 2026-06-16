@@ -1519,6 +1519,7 @@ class NC_Rest_Asistencia {
     $t_al = $wpdb->prefix . 'conducta_alumnos';
     $t_cur = $wpdb->prefix . 'conducta_cursos';
     $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_mod  = $wpdb->prefix . 'conducta_asistencia_modificaciones';
@@ -1531,7 +1532,34 @@ class NC_Rest_Asistencia {
 
     $where = 'a.activo=1';
     $params = [];
-    if ($aula_id) { $where .= ' AND a.aula_id=%d'; $params[] = $aula_id; }
+    $has_grupo_col = ((int) $wpdb->get_var($wpdb->prepare(
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'grupo_id'",
+      $t_al
+    ))) > 0;
+    $has_subgrupo_col = ((int) $wpdb->get_var($wpdb->prepare(
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'subgrupo'",
+      $t_al
+    ))) > 0;
+    $use_rel_aulas = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+    if ($aula_id) {
+      if ($has_grupo_col && $use_rel_aulas) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d OR EXISTS (SELECT 1 FROM ' . $t_al_a . ' ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } elseif ($has_grupo_col) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d)';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } elseif ($use_rel_aulas) {
+        $where .= ' AND (a.aula_id=%d OR EXISTS (SELECT 1 FROM ' . $t_al_a . ' ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } else {
+        $where .= ' AND a.aula_id=%d';
+        $params[] = $aula_id;
+      }
+    }
     if ($curso_id) { $where .= ' AND a.curso_id=%d'; $params[] = $curso_id; }
     if ($subgrupo !== '') {
       $col_subgrupo = $wpdb->get_var($wpdb->prepare(
@@ -1556,15 +1584,30 @@ class NC_Rest_Asistencia {
       $params[] = $like;
     }
 
-    $sel_subgrupo = $wpdb->get_var($wpdb->prepare(
-      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'subgrupo'",
-      $t_al
-    )) ? ', a.subgrupo' : '';
-    $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, a.foto_url, a.curso_id, a.aula_id{$sel_subgrupo},
-                   c.nombre AS curso_nombre, au.nombre AS aula_nombre
+    $sel_subgrupo = $has_subgrupo_col ? ', a.subgrupo' : '';
+    $rel_group_expr = "(SELECT ag2.aula_id
+                        FROM $t_al_a ag2
+                        INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                        WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
+                        ORDER BY ag2.id DESC
+                        LIMIT 1)";
+    if ($has_grupo_col) {
+      $group_id_expr = $use_rel_aulas ? "COALESCE(a.grupo_id, a.aula_id, $rel_group_expr)" : 'COALESCE(a.grupo_id, a.aula_id)';
+      $sel_group_id = $group_id_expr . ' AS aula_id, a.grupo_id';
+      $join_group_expr = $group_id_expr;
+    } else {
+      $group_id_expr = $use_rel_aulas ? "COALESCE(a.aula_id, $rel_group_expr)" : 'a.aula_id';
+      $sel_group_id = $group_id_expr . ' AS aula_id, NULL AS grupo_id';
+      $join_group_expr = $group_id_expr;
+    }
+    $sel_grupo_nombre = $has_subgrupo_col
+      ? "COALESCE(NULLIF(au.nombre, ''), NULLIF(a.subgrupo, '')) AS grupo_nombre"
+      : "au.nombre AS grupo_nombre";
+    $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, a.foto_url, a.curso_id, $sel_group_id{$sel_subgrupo},
+                   c.nombre AS curso_nombre, au.nombre AS aula_nombre, $sel_grupo_nombre
             FROM $t_al a
             LEFT JOIN $t_cur c ON c.id=a.curso_id
-            LEFT JOIN $t_aul au ON au.id=a.aula_id
+            LEFT JOIN $t_aul au ON au.id=$join_group_expr
             WHERE $where
             ORDER BY a.apellidos ASC, a.nombres ASC";
     $alumnos = $params ? $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
