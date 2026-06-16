@@ -2904,6 +2904,24 @@
       return '"' + s.replace(/"/g, '""') + '"';
     }
 
+    function grupoNombreVisible(alumno) {
+      const rawGrupo = String((alumno && (alumno.grupo_nombre || alumno.aula_nombre)) || '').trim();
+      const subgrupo = String((alumno && alumno.subgrupo) || '').trim();
+      const fisicaCodeToGrupo = { K: 'Kappa', L: 'Lambda' };
+      if (rawGrupo) {
+        if (rawGrupo.indexOf('->') !== -1) {
+          const parts = rawGrupo.split('->');
+          const right = String(parts[1] || '').trim();
+          if (right) return right;
+        }
+        const code = rawGrupo.toUpperCase();
+        if (fisicaCodeToGrupo[code] && subgrupo) return subgrupo;
+        return rawGrupo;
+      }
+      if (subgrupo) return subgrupo;
+      return '';
+    }
+
     function downloadCsv(filename, rows) {
       const csvContent = '\ufeff' + rows.map(row => row.map(csvEscape).join(',')).join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -3006,7 +3024,7 @@
         const nombres = String(al.nombres || '').trim();
         const apellidos = String(al.apellidos || '').trim();
         const alumnoNombre = (apellidos + ', ' + nombres).trim().replace(/^,\s*/, '');
-        const grupo = String(al.aula_nombre || '').trim();
+        const grupo = grupoNombreVisible(al);
         const marks = cols.map(c => (rowsByAlumnoId[alumnoId] && rowsByAlumnoId[alumnoId][c.key]) ? rowsByAlumnoId[alumnoId][c.key] : '');
         csvRows.push([ci, alumnoNombre, grupo, ...marks]);
       });
@@ -3146,7 +3164,7 @@
                   <td style="padding:12px">${escapeHtml(a.apellidos || '')}</td>
                   <td style="padding:12px">${escapeHtml(a.ci || '')}</td>
                   <td style="padding:12px">${escapeHtml(a.curso_nombre || '')}</td>
-                  <td style="padding:12px">${escapeHtml(a.aula_nombre || '')}</td>
+                  <td style="padding:12px">${escapeHtml(grupoNombreVisible(a))}</td>
                   <td style="padding:12px"><span style="color:${color};font-weight:600">${a.promedio_texto || '0/0'} (${pct}%)</span></td>
                   <td style="padding:12px;text-align:center">
                     <div style="display:flex;gap:8px;justify-content:center">
