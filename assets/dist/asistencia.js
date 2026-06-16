@@ -1061,7 +1061,7 @@
           </div>
           <div style="overflow:auto">
             <table class="nc-table" id="nc-asis-marcar-table">
-              <thead><tr><th>Nombre</th><th>Apellido</th><th>Asistió</th><th>Observación</th></tr></thead>
+              <thead><tr><th style="width:48px;text-align:center">N°</th><th>Nombre</th><th>Apellido</th><th>Asistió</th><th>Observación</th></tr></thead>
               <tbody id="nc-asis-marcar-tbody"></tbody>
             </table>
           </div>
@@ -1401,11 +1401,12 @@
       });
       const tbody = contentEl.querySelector('#nc-asis-marcar-tbody');
       if (!tbody) return;
-      tbody.innerHTML = filtered.map(a => {
+      tbody.innerHTML = filtered.map((a, idx) => {
         const it = marcarState.items[a.id] || { asistio: false, observacion: '' };
         const asistioId = `nc-asis-toggle-${a.id}`;
         return `
           <tr data-alumno-id="${a.id}">
+            <td style="text-align:center;color:#666;font-weight:600">${idx + 1}</td>
             <td>${escapeHtml(a.nombres || '')}</td>
             <td>${escapeHtml(a.apellidos || '')}</td>
             <td class="nc-asis-acciones">
