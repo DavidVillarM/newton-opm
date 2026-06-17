@@ -1175,16 +1175,65 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     $t_aul = $wpdb->prefix . 'conducta_aulas';
     $t_fac = $wpdb->prefix . 'conducta_facultades';
     $t_car = $wpdb->prefix . 'conducta_carreras';
+    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+
+    $use_rel = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c)
+      && ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+    $has_grupo_col = self::table_has_column($t_al, 'grupo_id');
+
+    $sel_curso_col = 'a.curso_id';
+    $sel_aula_col = 'a.aula_id';
+    $sel_curso_nombre = 'c.nombre';
+    $sel_aula_nombre = 'au.nombre';
+    $join_group_expr = 'a.aula_id';
+
+    if ($use_rel) {
+      $sel_curso_col = "(SELECT ac2.curso_id
+                         FROM $t_al_c ac2
+                         INNER JOIN $t_cur c2 ON c2.id=ac2.curso_id
+                         WHERE ac2.alumno_id=a.id AND ac2.activo=1 AND c2.activo=1
+                         ORDER BY c2.nombre ASC
+                         LIMIT 1)";
+      $sel_aula_col = "(SELECT ag2.aula_id
+                        FROM $t_al_a ag2
+                        INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                        WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
+                        ORDER BY au2.nombre ASC
+                        LIMIT 1)";
+      $sel_curso_nombre = "(SELECT GROUP_CONCAT(DISTINCT c2.nombre ORDER BY c2.nombre SEPARATOR ', ')
+                           FROM $t_al_c ac2
+                           INNER JOIN $t_cur c2 ON c2.id=ac2.curso_id
+                           WHERE ac2.alumno_id=a.id AND ac2.activo=1 AND c2.activo=1)";
+      $sel_aula_nombre = "(SELECT GROUP_CONCAT(DISTINCT au2.nombre ORDER BY au2.nombre SEPARATOR ', ')
+                          FROM $t_al_a ag2
+                          INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                          WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1)";
+    }
+
+    $rel_group_expr = "(SELECT ag2.aula_id
+                        FROM $t_al_a ag2
+                        INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                        WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
+                        ORDER BY au2.nombre ASC
+                        LIMIT 1)";
+    if ($has_grupo_col) {
+      $join_group_expr = $use_rel
+        ? "COALESCE(a.grupo_id, a.aula_id, $rel_group_expr)"
+        : 'COALESCE(a.grupo_id, a.aula_id)';
+    } elseif ($use_rel) {
+      $join_group_expr = "COALESCE(a.aula_id, $rel_group_expr)";
+    }
 
     $sel_subgrupo = self::table_has_column($t_al, 'subgrupo') ? ', a.subgrupo' : '';
-    $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, a.foto_url, a.curso_id, a.aula_id, a.facultad_id, a.carrera_id{$sel_subgrupo},
-                   c.nombre AS curso_nombre,
-                   au.nombre AS aula_nombre,
+    $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, a.foto_url, $sel_curso_col AS curso_id, $sel_aula_col AS aula_id, a.facultad_id, a.carrera_id{$sel_subgrupo},
+                   COALESCE(NULLIF({$sel_curso_nombre}, ''), c.nombre) AS curso_nombre,
+                   COALESCE(NULLIF({$sel_aula_nombre}, ''), au.nombre) AS aula_nombre,
                    f.nombre AS facultad_nombre,
                    r.nombre AS carrera_nombre
             FROM $t_al a
             LEFT JOIN $t_cur c ON c.id = a.curso_id
-            LEFT JOIN $t_aul au ON au.id = a.aula_id
+            LEFT JOIN $t_aul au ON au.id = $join_group_expr
             LEFT JOIN $t_fac f ON f.id = a.facultad_id
             LEFT JOIN $t_car r ON r.id = a.carrera_id
             WHERE a.id = %d AND a.activo = 1";
