@@ -939,7 +939,7 @@
             <div style="font-size:18px;font-weight:700;margin-bottom:6px">${escapeHtml(alumnoDisplay(data) || 'Alumno')}</div>
             <div class="nc-mini">CI: <b>${escapeHtml(data.ci || '')}</b></div>
             <div class="nc-mini">Curso: <b>${escapeHtml(data.curso_nombre || '')}</b></div>
-            <div class="nc-mini">Grupo: <b>${escapeHtml(data.aula_nombre || '')}</b></div>
+            <div class="nc-mini">Grupo: <b>${escapeHtml(data.grupo_nombre || data.aula_nombre || '')}</b></div>
             <div class="nc-mini">Facultad: <b>${escapeHtml(data.facultad_nombre || '')}</b></div>
             <div class="nc-mini">Carrera: <b>${escapeHtml(data.carrera_nombre || '')}</b></div>
           </div>
