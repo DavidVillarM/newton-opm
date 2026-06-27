@@ -1195,12 +1195,15 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
                          WHERE ac2.alumno_id=a.id AND ac2.activo=1 AND c2.activo=1
                          ORDER BY c2.nombre ASC
                          LIMIT 1)";
-      $sel_aula_col = "(SELECT ag2.aula_id
+      $rel_aula_pick = "(SELECT ag2.aula_id
                         FROM $t_al_a ag2
                         INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
                         WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
                         ORDER BY au2.nombre ASC
                         LIMIT 1)";
+      $sel_aula_col = $has_grupo_col
+        ? "COALESCE(NULLIF(a.grupo_id,0), NULLIF(a.aula_id,0), $rel_aula_pick)"
+        : $rel_aula_pick;
       $sel_curso_nombre = "(SELECT GROUP_CONCAT(DISTINCT c2.nombre ORDER BY c2.nombre SEPARATOR ', ')
                            FROM $t_al_c ac2
                            INNER JOIN $t_cur c2 ON c2.id=ac2.curso_id
@@ -1228,7 +1231,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     $sel_subgrupo = self::table_has_column($t_al, 'subgrupo') ? ', a.subgrupo' : '';
     $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, a.foto_url, $sel_curso_col AS curso_id, $sel_aula_col AS aula_id, a.facultad_id, a.carrera_id{$sel_subgrupo},
                    COALESCE(NULLIF({$sel_curso_nombre}, ''), c.nombre) AS curso_nombre,
-                   COALESCE(NULLIF({$sel_aula_nombre}, ''), au.nombre) AS aula_nombre,
+                   COALESCE(NULLIF(au.nombre, ''), NULLIF({$sel_aula_nombre}, '')) AS aula_nombre,
                    f.nombre AS facultad_nombre,
                    r.nombre AS carrera_nombre
             FROM $t_al a
@@ -1314,6 +1317,20 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     $aula_expr = 'a.aula_id';
     $sel_curso_col = 'a.curso_id';
     $sel_aula_col = 'a.aula_id';
+    $has_grupo_col = self::table_has_column($t_al, 'grupo_id');
+    $rel_aula_pick = "(SELECT ag2.aula_id
+                      FROM $t_al_a ag2
+                      INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                      WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
+                      ORDER BY au2.nombre ASC
+                      LIMIT 1)";
+    if ($has_grupo_col) {
+      $aula_expr = $use_rel
+        ? "COALESCE(NULLIF(a.grupo_id,0), NULLIF(a.aula_id,0), $rel_aula_pick)"
+        : 'COALESCE(NULLIF(a.grupo_id,0), NULLIF(a.aula_id,0))';
+    } elseif ($use_rel) {
+      $aula_expr = "COALESCE(NULLIF(a.aula_id,0), $rel_aula_pick)";
+    }
 
     if ($use_rel && $curso_id) {
       $join_course = "INNER JOIN $t_al_c ac ON ac.alumno_id=a.id AND ac.curso_id=%d AND ac.activo=1";
@@ -1325,14 +1342,24 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
       $params[] = $curso_id;
     }
 
-    if ($use_rel && $aula_id) {
-      $join_aula = "INNER JOIN $t_al_a ag ON ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1";
-      $aula_expr = 'ag.aula_id';
-      $sel_aula_col = 'ag.aula_id AS aula_id';
-      $params[] = $aula_id;
-    } elseif ($aula_id) {
-      $where .= ' AND a.aula_id=%d';
-      $params[] = $aula_id;
+    if ($aula_id) {
+      if ($has_grupo_col && $use_rel) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d OR EXISTS (SELECT 1 FROM ' . $t_al_a . ' ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } elseif ($has_grupo_col) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d)';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } elseif ($use_rel) {
+        $where .= ' AND (a.aula_id=%d OR EXISTS (SELECT 1 FROM ' . $t_al_a . ' ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))';
+        $params[] = $aula_id;
+        $params[] = $aula_id;
+      } else {
+        $where .= ' AND a.aula_id=%d';
+        $params[] = $aula_id;
+      }
     }
 
     // Si el frontend no filtra por curso/aula, para instalaciones nuevas sin columnas legacy
@@ -1347,12 +1374,12 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
                          LIMIT 1)";
     }
     if ($use_rel && !$aula_id) {
-      $sel_aula_col = "(SELECT ag2.aula_id
-                        FROM $t_al_a ag2
-                        INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
-                        WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
-                        ORDER BY au2.nombre ASC
-                        LIMIT 1)";
+      $pick = $has_grupo_col
+        ? "COALESCE(NULLIF(a.grupo_id,0), NULLIF(a.aula_id,0), $rel_aula_pick)"
+        : $rel_aula_pick;
+      $sel_aula_col = "$pick AS aula_id";
+    } elseif ($has_grupo_col && !$aula_id) {
+      $sel_aula_col = 'COALESCE(NULLIF(a.grupo_id,0), NULLIF(a.aula_id,0)) AS aula_id';
     }
 
     if (!empty($facultad_ids)) {
@@ -1372,8 +1399,17 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     }
     $t_am = $wpdb->prefix . 'conducta_alumno_materias';
     if ($materia_id && $wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_am) . "'") === $t_am) {
-      $where .= ' AND EXISTS (SELECT 1 FROM ' . $t_am . ' am WHERE am.alumno_id=a.id AND am.materia_id=%d)';
-      $params[] = $materia_id;
+      $t_mat = $wpdb->prefix . 'conducta_materias';
+      $materia_nombre = (string) $wpdb->get_var($wpdb->prepare(
+        "SELECT nombre FROM $t_mat WHERE id=%d LIMIT 1",
+        $materia_id
+      ));
+      if (class_exists('NC_Rest_Asistencia')) {
+        $where .= ' AND ' . NC_Rest_Asistencia::sql_materia_alumno_eligible($t_am, $materia_id, $materia_nombre, $params);
+      } else {
+        $where .= ' AND EXISTS (SELECT 1 FROM ' . $t_am . ' am WHERE am.alumno_id=a.id AND am.materia_id=%d)';
+        $params[] = $materia_id;
+      }
     }
 
     if ($search !== '') {
@@ -1425,10 +1461,13 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
                            FROM $t_al_c ac2
                            INNER JOIN $t_cur c2 ON c2.id=ac2.curso_id
                            WHERE ac2.alumno_id=a.id AND ac2.activo=1 AND c2.activo=1)";
-      $sel_aula_nombre = "(SELECT GROUP_CONCAT(DISTINCT au2.nombre ORDER BY au2.nombre SEPARATOR ', ')
+      $rel_aula_names = "(SELECT GROUP_CONCAT(DISTINCT au2.nombre ORDER BY au2.nombre SEPARATOR ', ')
                           FROM $t_al_a ag2
                           INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
                           WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1)";
+      $sel_aula_nombre = $has_grupo_col
+        ? "COALESCE(NULLIF(au.nombre,''), NULLIF($rel_aula_names,''))"
+        : $rel_aula_names;
     }
     $sel_curso = $sel_curso_col;
     $sel_aula  = $sel_aula_col;
@@ -1686,12 +1725,15 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
         'apellidos' => $apellidos,
         'ci' => $ci,
         'curso_id' => $curso_id,
-        'grupo_id' => $aula_id,
         'aula_id' => $aula_id,
         'facultad_id' => $facultad_id,
         'carrera_id' => $carrera_id,
       ];
-      $format = ['%s','%s','%s','%d','%d','%d','%d','%d'];
+      $format = ['%s','%s','%s','%d','%d','%d','%d'];
+      if (self::table_has_column($t_al, 'grupo_id')) {
+        $data['grupo_id'] = $aula_id;
+        $format[] = '%d';
+      }
       if (self::table_has_column($t_al, 'subgrupo')) {
         $data['subgrupo'] = $subgrupo;
         $format[] = '%s';
@@ -1742,7 +1784,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     
       $wpdb->update($t_al, $data, ['id' => $id], $format, ['%d']);
 
-      // Multi-pertenencia: append en tablas relación (no borra relaciones anteriores).
+      // Multi-pertenencia: al editar grupo, mover (no acumular) la pertenencia principal.
       $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
       $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
       $has_rel_c = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
@@ -1754,9 +1796,27 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
           $curso_id
         ));
       }
-      if ($has_rel_a && $aula_id) {
+      $grupo_enviado = array_key_exists('aula_id', $p) || array_key_exists('grupo_id', $p);
+      if ($has_rel_a && $grupo_enviado) {
+        if ($aula_id) {
+          $wpdb->query($wpdb->prepare(
+            "UPDATE $t_al_a SET activo=0 WHERE alumno_id=%d AND aula_id<>%d AND activo=1",
+            $id,
+            $aula_id
+          ));
+          $wpdb->query($wpdb->prepare(
+            "INSERT INTO $t_al_a (alumno_id, aula_id, activo) VALUES (%d,%d,1)
+             ON DUPLICATE KEY UPDATE activo=1",
+            $id,
+            $aula_id
+          ));
+        } else {
+          $wpdb->update($t_al_a, ['activo' => 0], ['alumno_id' => $id], ['%d'], ['%d']);
+        }
+      } elseif ($has_rel_a && $aula_id) {
         $wpdb->query($wpdb->prepare(
-          "INSERT IGNORE INTO $t_al_a (alumno_id, aula_id) VALUES (%d,%d)",
+          "INSERT INTO $t_al_a (alumno_id, aula_id, activo) VALUES (%d,%d,1)
+           ON DUPLICATE KEY UPDATE activo=1",
           $id,
           $aula_id
         ));
