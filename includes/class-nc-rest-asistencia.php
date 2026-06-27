@@ -978,9 +978,6 @@ class NC_Rest_Asistencia {
     }
     $p = is_array($p) ? $p : [];
     $items = isset($p['items']) && is_array($p['items']) ? $p['items'] : null;
-    // #region agent log
-    @file_put_contents($log_path, json_encode(['location'=>'update_sesion:parsed','message'=>'items parseados','data'=>['itemsCount'=>$items===null?0:count($items),'sample'=>$items&&count($items)>0?array_slice($items,0,2):[]],'timestamp'=>round(microtime(true)*1000),'hypothesisId'=>'E'])."\n", FILE_APPEND | LOCK_EX);
-    // #endregion
     if ($items === null) {
       return self::err('Faltan los datos de asistencia (items). Envíe el body en JSON con clave "items".', 400);
     }
@@ -1059,9 +1056,6 @@ class NC_Rest_Asistencia {
         }
       }
     }
-    // #region agent log
-    @file_put_contents($log_path, json_encode(['location'=>'update_sesion:after-replace','message'=>'después de replace en modificaciones','data'=>['last_error'=>$wpdb->last_error,'itemsProcessed'=>count($items)],'timestamp'=>round(microtime(true)*1000),'hypothesisId'=>'F'])."\n", FILE_APPEND | LOCK_EX);
-    // #endregion
     $wpdb->query($wpdb->prepare("UPDATE $t_asis SET modified_at=%s, modificado_por=%d WHERE id=%d", current_time('mysql'), $user_id, $id));
 
     // Totales aplicando modificaciones (COALESCE mod.asistio, item.asistio)
@@ -1075,9 +1069,6 @@ class NC_Rest_Asistencia {
     ), ARRAY_A);
     $total = (int)($row_counts['total'] ?? 0);
     $presentes = (int)($row_counts['presentes'] ?? 0);
-    // #region agent log
-    @file_put_contents($log_path, json_encode(['location'=>'update_sesion:return','message'=>'totales calculados','data'=>['total'=>$total,'presentes'=>$presentes,'presentes_total'=>$presentes.'/'.$total],'timestamp'=>round(microtime(true)*1000),'hypothesisId'=>'G'])."\n", FILE_APPEND | LOCK_EX);
-    // #endregion
     return self::ok([
       'updated' => true,
       'presentes' => $presentes,
@@ -2170,6 +2161,10 @@ class NC_Rest_Asistencia {
     // Prioridad: para CEA gana carrera (más específico).
     if (strpos($curso_key, 'cea') !== false) {
       $by_carrera = self::materia_ids_for_cea_carrera($facultad_nombre, $carrera_nombre);
+      $category = self::detect_cea_carrera_category($facultad_nombre, $carrera_nombre);
+      if ($category === 'medicina') {
+        $by_carrera = array_values(array_unique(array_merge($by_carrera, self::materia_ids_for_examen_medicina())));
+      }
       if (!empty($by_carrera)) return $by_carrera;
       return self::get_curso_materia_ids($curso_id);
     }
@@ -2303,6 +2298,76 @@ class NC_Rest_Asistencia {
     return self::ok(['quitados' => (int) $deleted]);
   }
 
+  /** Materia tipo examen de medicina (p. ej. "Examen Medicina 2026"). */
+  public static function materia_is_examen_medicina_name($nombre): bool {
+    $key = self::normalize_text_key($nombre);
+    return strpos($key, 'examen') !== false && strpos($key, 'medic') !== false;
+  }
+
+  /** IDs de materias examen de medicina activas. */
+  private static function materia_ids_for_examen_medicina(): array {
+    global $wpdb;
+    $t_mat = $wpdb->prefix . 'conducta_materias';
+    $rows = $wpdb->get_col(
+      "SELECT id FROM $t_mat WHERE activo=1 AND LOWER(nombre) LIKE '%examen%' AND LOWER(nombre) LIKE '%medic%'"
+    );
+    return array_values(array_unique(array_filter(array_map('intval', $rows ?: []), static function ($id) {
+      return $id > 0;
+    })));
+  }
+
+  /** Expresión SQL del grupo efectivo del alumno (grupo_id, aula_id o relación). */
+  public static function sql_alumno_grupo_id_expr($t_al, $t_al_a, $t_aul, bool $use_rel_aulas): string {
+    global $wpdb;
+    $has_grupo_col = ((int) $wpdb->get_var($wpdb->prepare(
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'grupo_id'",
+      $t_al
+    ))) > 0;
+    if ($use_rel_aulas) {
+      $rel = "(SELECT ag2.aula_id
+                FROM $t_al_a ag2
+                INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id
+                WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1
+                ORDER BY au2.nombre ASC
+                LIMIT 1)";
+      if ($has_grupo_col) {
+        return "COALESCE(a.grupo_id, a.aula_id, $rel)";
+      }
+      return "COALESCE(a.aula_id, $rel)";
+    }
+    return $has_grupo_col ? 'COALESCE(a.grupo_id, a.aula_id)' : 'a.aula_id';
+  }
+
+  /** Grupos de examen medicina: Lambda, Kappa, Pi, Xi (misma regla que puntajes). */
+  public static function sql_aula_nombre_medicina_grupo_match(string $alias = 'au'): string {
+    $n = $alias . '.nombre';
+    return "(
+      LOWER($n) LIKE '%lambda%'
+      OR LOWER($n) LIKE '%kappa%'
+      OR LOWER($n) LIKE '%xi%'
+      OR LOWER($n) REGEXP '(^|[^a-z])pi([^a-z]|$)'
+    )";
+  }
+
+  /**
+   * Condición SQL: alumno habilitado para una materia.
+   * Para examen medicina incluye estudiantes de carrera/facultad medicina aunque no estén inscriptos en la materia.
+   */
+  public static function sql_materia_alumno_eligible(string $t_am, int $materia_id, string $materia_nombre, array &$params): string {
+    $params[] = $materia_id;
+    $enrolled = "EXISTS (SELECT 1 FROM $t_am am WHERE am.alumno_id=a.id AND am.materia_id=%d)";
+    if (!self::materia_is_examen_medicina_name($materia_nombre)) {
+      return $enrolled;
+    }
+    global $wpdb;
+    $t_fac = $wpdb->prefix . 'conducta_facultades';
+    $t_car = $wpdb->prefix . 'conducta_carreras';
+    return "($enrolled OR (
+      LOWER(COALESCE((SELECT ca.nombre FROM $t_car ca WHERE ca.id=a.carrera_id LIMIT 1), '')) LIKE '%medic%'
+      OR LOWER(COALESCE((SELECT fa.nombre FROM $t_fac fa WHERE fa.id=a.facultad_id LIMIT 1), '')) LIKE '%medic%'
+    ))";
+  }
+
   /** GET /asistencia/materias/:id/grupos — Grupos (aulas) que tienen alumnos inscriptos a esa materia. */
   public static function materia_grupos_list(WP_REST_Request $req) {
     self::ensure_tables();
@@ -2313,19 +2378,52 @@ class NC_Rest_Asistencia {
     $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
     $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_mat  = $wpdb->prefix . 'conducta_materias';
+    $t_fac  = $wpdb->prefix . 'conducta_facultades';
+    $t_car  = $wpdb->prefix . 'conducta_carreras';
 
     if ($materia_id <= 0) return self::ok(['items' => []]);
 
-    $has_am   = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_am) . "'") === $t_am);
-    $has_rel  = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
-    if (!$has_am || !$has_rel) return self::ok(['items' => []]);
+    $materia_nombre = (string) $wpdb->get_var($wpdb->prepare(
+      "SELECT nombre FROM $t_mat WHERE id=%d LIMIT 1",
+      $materia_id
+    ));
+    $is_exam_medicina = self::materia_is_examen_medicina_name($materia_nombre);
+    $has_am = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_am) . "'") === $t_am);
+    $use_rel = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+    $group_id_expr = self::sql_alumno_grupo_id_expr($t_al, $t_al_a, $t_aul, $use_rel);
+    $grupo_match = self::sql_aula_nombre_medicina_grupo_match('au');
+
+    if ($is_exam_medicina) {
+      $eligible_parts = [
+        "LOWER(COALESCE(ca.nombre,'')) LIKE '%medic%'",
+        "LOWER(COALESCE(fa.nombre,'')) LIKE '%medic%'",
+      ];
+      $params = [];
+      if ($has_am) {
+        $eligible_parts[] = "EXISTS (SELECT 1 FROM $t_am am WHERE am.alumno_id=a.id AND am.materia_id=%d)";
+        $params[] = $materia_id;
+      }
+      $sql = "SELECT DISTINCT au.id, au.nombre
+              FROM $t_al a
+              LEFT JOIN $t_fac fa ON fa.id=a.facultad_id
+              LEFT JOIN $t_car ca ON ca.id=a.carrera_id
+              INNER JOIN $t_aul au ON au.id=$group_id_expr AND au.activo=1
+              WHERE a.activo=1
+                AND $grupo_match
+                AND (" . implode(' OR ', $eligible_parts) . ")
+              ORDER BY au.nombre ASC";
+      $rows = $params ? $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+      return self::ok(['items' => $rows ?: []]);
+    }
+
+    if (!$has_am) return self::ok(['items' => []]);
 
     $sql = "SELECT DISTINCT au.id, au.nombre
             FROM $t_am am
-            INNER JOIN $t_al_a ag ON ag.alumno_id = am.alumno_id AND ag.activo = 1
-            INNER JOIN $t_al a ON a.id = am.alumno_id AND a.activo = 1
-            INNER JOIN $t_aul au ON au.id = ag.aula_id AND au.activo = 1
-            WHERE am.materia_id = %d
+            INNER JOIN $t_al a ON a.id=am.alumno_id AND a.activo=1
+            INNER JOIN $t_aul au ON au.id=$group_id_expr AND au.activo=1
+            WHERE am.materia_id=%d
             ORDER BY au.nombre ASC";
 
     $rows = $wpdb->get_results($wpdb->prepare($sql, $materia_id), ARRAY_A);
