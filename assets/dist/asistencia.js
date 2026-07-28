@@ -340,13 +340,13 @@
 
     if (!document.getElementById('nc-asistencia-styles')) {
       const style = el('style', { id: 'nc-asistencia-styles' }, `
-        .nc-asistencia-wrap { padding: 0 4px; }
+        .nc-asistencia-wrap { padding: 0 8px; box-sizing: border-box; }
         .nc-asistencia-subtabs { margin-bottom: 12px; }
         .nc-asistencia-subtabs .nc-tab { padding: 8px 14px; font-size: 13px; }
         .nc-asis-acciones { white-space: nowrap; }
         .nc-asis-btn-asistio { width: 36px; height: 36px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 16px; margin-right: 4px; }
         .nc-asis-btn-asistio.activo { background: #2e7d32; color: #fff; border-color: #2e7d32; }
-        .nc-toggle-switch { position: relative; display: inline-block; width: 50px; height: 24px; }
+        .nc-toggle-switch { position: relative; display: inline-block; width: 50px; height: 24px; flex-shrink: 0; vertical-align: middle; }
         .nc-toggle-switch input { opacity: 0; width: 0; height: 0; }
         .nc-toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
         .nc-toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
@@ -370,9 +370,29 @@
         .nc-modal-overlay input[type="date"] { text-align: left !important; padding: 8px 10px !important; border: 1px solid #ddd !important; border-radius: 6px !important; font-size: 14px !important; box-sizing: border-box !important; min-width: 0; width: 100%; background: #fff; }
         .nc-asis-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
         .nc-asis-table-scroll .nc-table { min-width: 560px; }
+        /* Lista marcar: columnas de nombre/apellido más angostas para que el toggle no quede cortado */
+        .nc-asis-marcar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+        #nc-asis-marcar-table { width: 100%; table-layout: fixed; border-collapse: collapse; min-width: 0; }
+        #nc-asis-marcar-table th, #nc-asis-marcar-table td { padding: 8px 6px; vertical-align: middle; overflow-wrap: anywhere; word-break: break-word; }
+        #nc-asis-marcar-table .nc-asis-col-num { width: 2.25em; text-align: center; padding-left: 2px; padding-right: 2px; }
+        #nc-asis-marcar-table .nc-asis-col-nombre,
+        #nc-asis-marcar-table .nc-asis-col-apellido { width: 22%; }
+        #nc-asis-marcar-table .nc-asis-col-asistio { width: 58px; text-align: center; white-space: nowrap; padding-right: 10px; }
+        #nc-asis-marcar-table .nc-asis-col-obs { width: auto; }
+        #nc-asis-marcar-table .nc-asis-obs { width: 100% !important; max-width: 100% !important; box-sizing: border-box; }
         @media (max-width: 768px) {
           .nc-asistencia-wrap .nc-tabs { flex-direction: column; }
           .nc-asistencia-stats { grid-template-columns: 1fr !important; }
+          #nc-asis-marcar-table { font-size: 12.5px; }
+          #nc-asis-marcar-table th, #nc-asis-marcar-table td { padding: 7px 4px; }
+          #nc-asis-marcar-table .nc-asis-col-nombre,
+          #nc-asis-marcar-table .nc-asis-col-apellido { width: 30%; }
+          #nc-asis-marcar-table .nc-asis-col-asistio { width: 52px; padding-right: 14px; }
+          #nc-asis-marcar-table .nc-asis-col-obs { width: 18%; }
+          #nc-asis-marcar-table .nc-asis-obs { font-size: 12px; padding: 4px 6px !important; }
+          .nc-asistencia-content .nc-toggle-switch { width: 42px; height: 22px; }
+          .nc-asistencia-content .nc-toggle-slider:before { height: 16px; width: 16px; }
+          .nc-asistencia-content .nc-toggle-switch input:checked + .nc-toggle-slider:before { transform: translateX(20px); }
         }
         .nc-modal-overlay { position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.5) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 99999 !important; padding: 16px !important; overflow-y: auto !important; }
         .nc-modal-overlay .nc-modal { position: relative !important; margin: auto !important; flex-shrink: 0 !important; }
@@ -1059,9 +1079,15 @@
             </div>
             <span id="nc-asis-contador" style="font-weight:600;margin-left:auto"></span>
           </div>
-          <div style="overflow:auto">
+          <div class="nc-asis-marcar-scroll">
             <table class="nc-table" id="nc-asis-marcar-table">
-              <thead><tr><th style="width:48px;text-align:center">N°</th><th>Nombre</th><th>Apellido</th><th>Asistió</th><th>Observación</th></tr></thead>
+              <thead><tr>
+                <th class="nc-asis-col-num">N°</th>
+                <th class="nc-asis-col-nombre">Nombre</th>
+                <th class="nc-asis-col-apellido">Apellido</th>
+                <th class="nc-asis-col-asistio">Asistió</th>
+                <th class="nc-asis-col-obs">Observación</th>
+              </tr></thead>
               <tbody id="nc-asis-marcar-tbody"></tbody>
             </table>
           </div>
@@ -1406,16 +1432,16 @@
         const asistioId = `nc-asis-toggle-${a.id}`;
         return `
           <tr data-alumno-id="${a.id}">
-            <td style="text-align:center;color:#666;font-weight:600">${idx + 1}</td>
-            <td>${escapeHtml(a.nombres || '')}</td>
-            <td>${escapeHtml(a.apellidos || '')}</td>
-            <td class="nc-asis-acciones">
+            <td class="nc-asis-col-num" style="color:#666;font-weight:600">${idx + 1}</td>
+            <td class="nc-asis-col-nombre">${escapeHtml(a.nombres || '')}</td>
+            <td class="nc-asis-col-apellido">${escapeHtml(a.apellidos || '')}</td>
+            <td class="nc-asis-col-asistio nc-asis-acciones">
               <label class="nc-toggle-switch" title="${it.asistio ? 'Asistió' : 'No asistió'}">
                 <input type="checkbox" id="${asistioId}" data-alumno-id="${a.id}" ${it.asistio ? 'checked' : ''} />
                 <span class="nc-toggle-slider"></span>
               </label>
             </td>
-            <td><input type="text" class="nc-asis-obs" data-alumno-id="${a.id}" value="${escapeHtml(it.observacion || '')}" placeholder="Observación" style="width:100%;max-width:200px;padding:6px" /></td>
+            <td class="nc-asis-col-obs"><input type="text" class="nc-asis-obs" data-alumno-id="${a.id}" value="${escapeHtml(it.observacion || '')}" placeholder="Obs." style="padding:6px" /></td>
           </tr>
         `;
       }).join('');
