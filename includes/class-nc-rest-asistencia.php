@@ -66,6 +66,39 @@ class NC_Rest_Asistencia {
     $r['grupo_id'] = null;
   }
 
+  /** En reportes, el curso visible sigue al grupo (CNA Presencial → CNA), no a un curso inferido al azar. */
+  private static function apply_curso_from_grupo_display(array &$r): void {
+    if (self::is_simulacro_sesion_row($r)) {
+      return;
+    }
+    $fecha = trim((string) ($r['fecha'] ?? ''));
+    $grupo_nombre = trim((string) ($r['grupo_nombre'] ?? ''));
+    $matched_id = self::match_curso_id_from_grupo_nombre($grupo_nombre);
+    if ($matched_id && self::sesion_fecha_desde_curso($fecha, $matched_id)) {
+      $r['curso_id'] = $matched_id;
+      $nombre = self::curso_nombre_by_id($matched_id);
+      if ($nombre !== '') {
+        $r['curso_nombre'] = $nombre;
+      }
+      return;
+    }
+    $grupo_curso_id = self::int_or_null($r['grupo_curso_id'] ?? null);
+    if (
+      $grupo_curso_id
+      && self::sesion_fecha_desde_curso($fecha, $grupo_curso_id)
+      && !(self::is_cna_curso_id($grupo_curso_id) && !self::is_cna_grupo_nombre($grupo_nombre))
+    ) {
+      $r['curso_id'] = $grupo_curso_id;
+      $grupo_curso_nombre = trim((string) ($r['grupo_curso_nombre'] ?? ''));
+      if ($grupo_curso_nombre !== '') {
+        $r['curso_nombre'] = $grupo_curso_nombre;
+      } else {
+        $nombre = self::curso_nombre_by_id($grupo_curso_id);
+        if ($nombre !== '') $r['curso_nombre'] = $nombre;
+      }
+    }
+  }
+
   private static function ok($data, int $status = 200) {
     return new WP_REST_Response($data, $status);
   }
@@ -252,6 +285,30 @@ class NC_Rest_Asistencia {
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => [__CLASS__, 'lista_alumnos'],
         'permission_callback' => [__CLASS__, 'can_access'],
+        'args'                => [
+          'aula_id'     => ['type' => 'integer', 'required' => false],
+          'curso_id'    => ['type' => 'integer', 'required' => false],
+          'materia_id'  => ['type' => 'integer', 'required' => false],
+          'search'      => ['type' => 'string', 'required' => false],
+          'subgrupo'    => ['type' => 'string', 'required' => false],
+          'fecha_desde' => ['type' => 'string', 'required' => false],
+          'fecha_hasta' => ['type' => 'string', 'required' => false],
+        ],
+      ],
+    ]);
+    register_rest_route($ns, '/asistencia/reporte-periodo', [
+      [
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => [__CLASS__, 'reporte_periodo'],
+        'permission_callback' => [__CLASS__, 'can_access'],
+        'args'                => [
+          'curso_id'    => ['type' => 'integer', 'required' => false],
+          'grupo_id'    => ['type' => 'integer', 'required' => false],
+          'aula_id'     => ['type' => 'integer', 'required' => false],
+          'materia_id'  => ['type' => 'integer', 'required' => false],
+          'fecha_desde' => ['type' => 'string', 'required' => false],
+          'fecha_hasta' => ['type' => 'string', 'required' => false],
+        ],
       ],
     ]);
     register_rest_route($ns, '/asistencia/alumnos/(?P<id>\d+)/materias', [
@@ -319,6 +376,10 @@ class NC_Rest_Asistencia {
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => [__CLASS__, 'historial_alumno'],
         'permission_callback' => [__CLASS__, 'can_access'],
+        'args'                => [
+          'fecha_desde' => ['type' => 'string', 'required' => false],
+          'fecha_hasta' => ['type' => 'string', 'required' => false],
+        ],
       ],
     ]);
     register_rest_route($ns, '/asistencia/items/(?P<id>\d+)', [
@@ -593,7 +654,7 @@ class NC_Rest_Asistencia {
 
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_mat = $wpdb->prefix . 'conducta_materias';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
     $t_mod = $wpdb->prefix . 'conducta_asistencia_modificaciones';
     $users = $wpdb->prefix . 'users';
@@ -668,6 +729,8 @@ class NC_Rest_Asistencia {
                    a.observacion_general, a.created_at, a.modified_at,
                    m.nombre AS materia_nombre,
                    c.nombre AS curso_nombre,
+                   au_g.curso_id AS grupo_curso_id,
+                   c_g.nombre AS grupo_curso_nombre,
                    au_f.nombre AS aula_fisica_nombre,
                    $grupo_nombre_expr AS grupo_nombre,
                    u1.display_name AS creado_por_nombre,
@@ -679,6 +742,7 @@ class NC_Rest_Asistencia {
             LEFT JOIN $t_cur c ON c.id=a.curso_id
             LEFT JOIN $t_aul au_f ON au_f.id=a.aula_id
             LEFT JOIN $t_aul au_g ON au_g.id = $group_identifier_expr
+            LEFT JOIN $t_cur c_g ON c_g.id = au_g.curso_id
             LEFT JOIN $users u1 ON u1.ID=a.creado_por
             LEFT JOIN $users u2 ON u2.ID=a.docente_encargado_id
             $join_modificado
@@ -732,6 +796,7 @@ class NC_Rest_Asistencia {
     foreach ($counts as $c) { $by_id[(int)$c['asistencia_id']] = [(int)$c['total'], (int)$c['presentes']]; }
     foreach ($rows as &$r) {
       $r['presentes_total'] = isset($by_id[$r['id']]) ? $by_id[$r['id']][1] . '/' . $by_id[$r['id']][0] : '0/0';
+      self::apply_curso_from_grupo_display($r);
       self::apply_simulacro_sesion_display($r);
     }
     unset($r);
@@ -746,7 +811,7 @@ class NC_Rest_Asistencia {
     $id = (int) $req['id'];
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_mat = $wpdb->prefix . 'conducta_materias';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
     $t_mod = $wpdb->prefix . 'conducta_asistencia_modificaciones';
     $t_al = $wpdb->prefix . 'conducta_alumnos';
@@ -824,10 +889,6 @@ class NC_Rest_Asistencia {
 
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
-    $t_al = $wpdb->prefix . 'conducta_alumnos';
-    $t_cm = $wpdb->prefix . 'conducta_curso_materias';
-    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
-    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
 
     // Lista simulacro: grupo mezclado; no inferir curso/grupo desde alumnos.
     if ($simulacro_id > 0) {
@@ -841,42 +902,14 @@ class NC_Rest_Asistencia {
       $subgrupo = 'Simulacro';
     }
 
-    // El curso se infiere por materia + grupo (no se selecciona manualmente en front).
-    // Si no se puede inferir, caemos al legacy.
-    if (!$curso_id && $simulacro_id <= 0) {
-      $has_rel = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c)
-        && ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
-      if ($grupo_id && $has_rel) {
-        $curso_id = $wpdb->get_var($wpdb->prepare(
-          "SELECT cm.curso_id
-           FROM $t_cm cm
-           WHERE cm.materia_id = %d
-             AND EXISTS (
-               SELECT 1
-               FROM $t_al_a ag
-               INNER JOIN $t_al_c ac ON ac.alumno_id = ag.alumno_id AND ac.curso_id = cm.curso_id AND ac.activo = 1
-               INNER JOIN $t_al al ON al.id = ag.alumno_id AND al.activo = 1
-               WHERE ag.aula_id = %d AND ag.activo = 1
-             )
-           LIMIT 1",
-          $materia_id,
-          $grupo_id
-        ));
-      }
-      if (!$curso_id) {
-        if ($grupo_id) {
-          $curso_id = $wpdb->get_var($wpdb->prepare(
-            "SELECT curso_id FROM $t_al WHERE grupo_id=%d AND activo=1 LIMIT 1",
-            $grupo_id
-          ));
-        } elseif ($aula_id) {
-          $curso_id = $wpdb->get_var($wpdb->prepare(
-            "SELECT curso_id FROM $t_al WHERE aula_id=%d AND activo=1 LIMIT 1",
-            $aula_id
-          ));
-        }
-      }
-      $curso_id = $curso_id ? (int)$curso_id : null;
+    // El curso se infiere por el grupo (nombre / aula.curso_id), no por un alumno o materia compartida.
+    if ($simulacro_id <= 0) {
+      $curso_id = self::resolve_curso_id_for_asistencia(
+        $grupo_id ?: null,
+        $aula_id ?: null,
+        $materia_id ?: null,
+        $curso_id
+      );
     }
 
     // Fecha/hora de creación en zona horaria de Paraguay (America/Asuncion)
@@ -1264,7 +1297,7 @@ class NC_Rest_Asistencia {
       $t_asis = $wpdb->prefix . 'conducta_asistencias';
       $t_items = $wpdb->prefix . 'conducta_asistencia_items';
       $t_mod  = $wpdb->prefix . 'conducta_asistencia_modificaciones';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
 
       // Verificar que las tablas existan
       $tables = $wpdb->get_col('SHOW TABLES');
@@ -1387,7 +1420,7 @@ class NC_Rest_Asistencia {
       $t_asis = $wpdb->prefix . 'conducta_asistencias';
       $t_items = $wpdb->prefix . 'conducta_asistencia_items';
       $t_mod  = $wpdb->prefix . 'conducta_asistencia_modificaciones';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
 
       $tables = $wpdb->get_col('SHOW TABLES');
       if (!is_array($tables) || !in_array($t_asis, $tables, true) || !in_array($t_items, $tables, true)) {
@@ -1502,6 +1535,418 @@ class NC_Rest_Asistencia {
     }
   }
 
+  /**
+   * GET /asistencia/reporte-periodo
+   * Reporte visual por periodo: un gráfico por día de clase + grilla alumno × día.
+   * Curso obligatorio; grupo y materia opcionales.
+   */
+  public static function reporte_periodo(WP_REST_Request $req) {
+    self::ensure_tables();
+    try {
+      return self::reporte_periodo_query($req);
+    } catch (Throwable $e) {
+      error_log('[NC_Asistencia] reporte_periodo: ' . $e->getMessage());
+      return self::err('Error al generar el reporte de asistencia.', 500);
+    }
+  }
+
+  private static function reporte_periodo_query(WP_REST_Request $req) {
+    global $wpdb;
+
+    $curso_id = self::int_or_null(self::req_query_int($req, 'curso_id'));
+    $grupo_id = self::int_or_null(self::req_query_int($req, 'grupo_id'));
+    $aula_id = self::int_or_null(self::req_query_int($req, 'aula_id'));
+    $filter_grupo = $grupo_id ?: $aula_id;
+    $materia_id = self::int_or_null(self::req_query_int($req, 'materia_id'));
+    $fecha_desde = self::req_query_str($req, 'fecha_desde');
+    $fecha_hasta = self::req_query_str($req, 'fecha_hasta');
+
+    if (!$curso_id) {
+      return self::err('El curso es obligatorio para generar el reporte.');
+    }
+    if ($fecha_desde === '' || $fecha_hasta === '') {
+      return self::err('Indique el periodo (desde y hasta).');
+    }
+    if (!self::parse_ymd_date($fecha_desde) || !self::parse_ymd_date($fecha_hasta)) {
+      return self::err('Fechas inválidas. Use formato YYYY-MM-DD.');
+    }
+    if ($fecha_desde > $fecha_hasta) {
+      return self::err('La fecha «Desde» no puede ser posterior a «Hasta».');
+    }
+
+    $t_asis = $wpdb->prefix . 'conducta_asistencias';
+    $t_items = $wpdb->prefix . 'conducta_asistencia_items';
+    $t_mod = $wpdb->prefix . 'conducta_asistencia_modificaciones';
+    $t_mat = $wpdb->prefix . 'conducta_materias';
+    $t_aul = NC_DB::table_grupos();
+    $t_cur = $wpdb->prefix . 'conducta_cursos';
+    $t_al = $wpdb->prefix . 'conducta_alumnos';
+
+    $curso_row = $wpdb->get_row($wpdb->prepare(
+      "SELECT nombre, created_at FROM $t_cur WHERE id=%d",
+      $curso_id
+    ), ARRAY_A);
+    $curso_nombre = trim((string) ($curso_row['nombre'] ?? ''));
+    if ($curso_nombre === '') {
+      return self::err('Curso no encontrado.', 404);
+    }
+    $curso_created_ymd = self::ymd_from_datetime($curso_row['created_at'] ?? '');
+
+    $grupo_nombre = '';
+    if ($filter_grupo) {
+      $grupo_nombre = (string) $wpdb->get_var($wpdb->prepare(
+        "SELECT nombre FROM $t_aul WHERE id=%d",
+        $filter_grupo
+      ));
+      if ($grupo_nombre !== '' && strpos($grupo_nombre, '->') !== false) {
+        $parts = explode('->', $grupo_nombre, 2);
+        $grupo_nombre = trim((string) ($parts[1] ?? $grupo_nombre));
+      }
+    }
+
+    $materia_nombre = '';
+    if ($materia_id) {
+      $materia_nombre = (string) $wpdb->get_var($wpdb->prepare(
+        "SELECT nombre FROM $t_mat WHERE id=%d",
+        $materia_id
+      ));
+    }
+
+    $has_grupo_col = self::asistencias_has_column('grupo_id');
+    $has_sim_col = self::asistencias_has_column('simulacro_id');
+    $has_subgrupo_col = self::asistencias_has_column('subgrupo');
+
+    $grupo_ids_curso = [];
+    $aulas_rows = $wpdb->get_results(
+      "SELECT id, nombre, curso_id FROM $t_aul WHERE activo=1",
+      ARRAY_A
+    ) ?: [];
+    $curso_es_cna = self::is_cna_curso_nombre($curso_nombre);
+    foreach ($aulas_rows as $au) {
+      $aid = (int) ($au['id'] ?? 0);
+      if ($aid <= 0) continue;
+      $nombre_au = (string) ($au['nombre'] ?? '');
+      if ($curso_es_cna) {
+        if (self::is_cna_grupo_nombre($nombre_au)) {
+          $grupo_ids_curso[] = $aid;
+        }
+        continue;
+      }
+      $by_name = self::match_curso_id_from_grupo_nombre($nombre_au);
+      $by_col = (int) ($au['curso_id'] ?? 0);
+      $resolved = $by_name ?: $by_col;
+      if ($resolved === $curso_id) {
+        $grupo_ids_curso[] = $aid;
+      }
+    }
+    $grupo_ids_curso = array_values(array_unique($grupo_ids_curso));
+
+    $where = 'a.activo=1 AND a.fecha>=%s AND a.fecha<=%s';
+    $params = [$fecha_desde, $fecha_hasta];
+
+    if ($curso_es_cna && $grupo_ids_curso) {
+      $ph_g = implode(',', array_fill(0, count($grupo_ids_curso), '%d'));
+      $group_match = "a.aula_id IN ($ph_g)";
+      $group_params = $grupo_ids_curso;
+      if ($has_grupo_col) {
+        $group_match .= " OR a.grupo_id IN ($ph_g)";
+        $group_params = array_merge($group_params, $grupo_ids_curso);
+      }
+      $params = array_merge($params, $group_params);
+      if ($curso_created_ymd !== '') {
+        $curso_clause = "($group_match) AND (a.curso_id=%d OR a.fecha>=%s)";
+        $params[] = $curso_id;
+        $params[] = $curso_created_ymd;
+      } else {
+        $curso_clause = "($group_match) AND a.curso_id=%d";
+        $params[] = $curso_id;
+      }
+    } else {
+      $curso_clause = 'a.curso_id=%d';
+      $params[] = $curso_id;
+      if ($grupo_ids_curso) {
+        $ph_g = implode(',', array_fill(0, count($grupo_ids_curso), '%d'));
+        $group_match = "a.aula_id IN ($ph_g)";
+        $group_params = $grupo_ids_curso;
+        if ($has_grupo_col) {
+          $group_match .= " OR a.grupo_id IN ($ph_g)";
+          $group_params = array_merge($group_params, $grupo_ids_curso);
+        }
+        if ($curso_created_ymd !== '') {
+          $curso_clause .= " OR (($group_match) AND a.fecha>=%s)";
+          $params = array_merge($params, $group_params, [$curso_created_ymd]);
+        } else {
+          $curso_clause .= " OR ($group_match)";
+          $params = array_merge($params, $group_params);
+        }
+      }
+    }
+    $where .= " AND ($curso_clause)";
+
+    if ($filter_grupo) {
+      if ($has_grupo_col) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d)';
+        $params[] = $filter_grupo;
+        $params[] = $filter_grupo;
+      } else {
+        $where .= ' AND a.aula_id=%d';
+        $params[] = $filter_grupo;
+      }
+    }
+    if ($materia_id) {
+      $where .= ' AND a.materia_id=%d';
+      $params[] = $materia_id;
+    }
+    if ($has_sim_col) {
+      $where .= ' AND (a.simulacro_id IS NULL OR a.simulacro_id=0)';
+    }
+    if ($has_subgrupo_col) {
+      $where .= " AND (a.subgrupo IS NULL OR a.subgrupo='' OR LOWER(a.subgrupo) <> 'simulacro')";
+    }
+
+    $sql_ses = "SELECT a.id, a.fecha, a.materia_id, a.aula_id, a.curso_id,
+                       m.nombre AS materia_nombre
+                FROM $t_asis a
+                LEFT JOIN $t_mat m ON m.id=a.materia_id
+                WHERE $where
+                ORDER BY a.fecha ASC, a.id ASC
+                LIMIT 2000";
+    $sesiones = $wpdb->get_results($wpdb->prepare($sql_ses, $params), ARRAY_A) ?: [];
+
+    $dias_map = [];
+    $sesion_ids = [];
+    foreach ($sesiones as $s) {
+      $sid = (int) ($s['id'] ?? 0);
+      $fecha = (string) ($s['fecha'] ?? '');
+      if ($sid <= 0 || $fecha === '') continue;
+      $sesion_ids[] = $sid;
+      if (!isset($dias_map[$fecha])) {
+        $dias_map[$fecha] = [
+          'fecha' => $fecha,
+          'sesiones' => 0,
+          'presentes' => 0,
+          'ausentes' => 0,
+          'total' => 0,
+        ];
+      }
+      $dias_map[$fecha]['sesiones'] += 1;
+    }
+    $fechas = array_keys($dias_map);
+    sort($fechas);
+
+    // alumno_id => fecha => [presentes, total]
+    $by_alumno_fecha = [];
+    if ($sesion_ids) {
+      $ph = implode(',', array_fill(0, count($sesion_ids), '%d'));
+      $item_rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT i.alumno_id, s.fecha,
+                COUNT(*) AS total,
+                COALESCE(SUM(COALESCE(m.asistio, i.asistio)), 0) AS presentes
+         FROM $t_items i
+         INNER JOIN $t_asis s ON s.id=i.asistencia_id
+         LEFT JOIN $t_mod m ON m.asistencia_id=i.asistencia_id AND m.asistencia_item_id=i.id
+         WHERE i.asistencia_id IN ($ph)
+         GROUP BY i.alumno_id, s.fecha",
+        $sesion_ids
+      ), ARRAY_A) ?: [];
+      foreach ($item_rows as $r) {
+        $aid = (int) ($r['alumno_id'] ?? 0);
+        $fecha = (string) ($r['fecha'] ?? '');
+        $total = (int) ($r['total'] ?? 0);
+        $presentes = (int) ($r['presentes'] ?? 0);
+        if ($aid <= 0 || $fecha === '' || $total <= 0) continue;
+        if (!isset($by_alumno_fecha[$aid])) $by_alumno_fecha[$aid] = [];
+        $by_alumno_fecha[$aid][$fecha] = [$presentes, $total];
+      }
+    }
+
+    $roster = self::alumnos_para_reporte_periodo($curso_id, $filter_grupo, $materia_id);
+    $alumnos_by_id = [];
+    foreach ($roster as $al) {
+      $id = (int) ($al['id'] ?? 0);
+      if ($id > 0) $alumnos_by_id[$id] = $al;
+    }
+    $missing_ids = [];
+    foreach (array_keys($by_alumno_fecha) as $aid) {
+      if (!isset($alumnos_by_id[(int) $aid])) $missing_ids[] = (int) $aid;
+    }
+    if ($missing_ids) {
+      $ph = implode(',', array_fill(0, count($missing_ids), '%d'));
+      $extra = $wpdb->get_results($wpdb->prepare(
+        "SELECT a.id, a.nombres, a.apellidos, a.ci
+         FROM $t_al a
+         WHERE a.id IN ($ph)",
+        $missing_ids
+      ), ARRAY_A) ?: [];
+      foreach ($extra as $al) {
+        $id = (int) ($al['id'] ?? 0);
+        if ($id > 0 && !isset($alumnos_by_id[$id])) {
+          $al['grupo_nombre'] = '';
+          $alumnos_by_id[$id] = $al;
+        }
+      }
+    }
+
+    $strict_days = (bool) $filter_grupo;
+    $alumnos_out = [];
+    foreach ($alumnos_by_id as $al) {
+      $aid = (int) ($al['id'] ?? 0);
+      if ($aid <= 0) continue;
+      $dias = [];
+      $asistidas = 0;
+      $esperadas = 0;
+      foreach ($fechas as $fecha) {
+        $rec = $by_alumno_fecha[$aid][$fecha] ?? null;
+        if ($rec) {
+          $esperadas += 1;
+          $asistio = ((int) $rec[0] >= (int) $rec[1]) ? 1 : 0;
+          if ($asistio === 1) $asistidas += 1;
+          $dias[$fecha] = $asistio;
+        } elseif ($strict_days) {
+          $esperadas += 1;
+          $dias[$fecha] = 0;
+        } else {
+          $dias[$fecha] = null;
+        }
+      }
+      $grupo_label = (string) ($al['grupo_nombre'] ?? $al['aula_nombre'] ?? '');
+      if ($grupo_label !== '' && strpos($grupo_label, '->') !== false) {
+        $parts = explode('->', $grupo_label, 2);
+        $grupo_label = trim((string) ($parts[1] ?? $grupo_label));
+      }
+      $alumnos_out[] = [
+        'id' => $aid,
+        'nombres' => (string) ($al['nombres'] ?? ''),
+        'apellidos' => (string) ($al['apellidos'] ?? ''),
+        'ci' => (string) ($al['ci'] ?? ''),
+        'grupo_nombre' => $grupo_label,
+        'asistidas' => $asistidas,
+        'total_clases' => $esperadas,
+        'dias' => $dias,
+      ];
+    }
+    usort($alumnos_out, static function ($a, $b) {
+      $cmp = strcasecmp((string) ($a['apellidos'] ?? ''), (string) ($b['apellidos'] ?? ''));
+      if ($cmp !== 0) return $cmp;
+      return strcasecmp((string) ($a['nombres'] ?? ''), (string) ($b['nombres'] ?? ''));
+    });
+
+    $dias_out = [];
+    foreach ($fechas as $idx => $fecha) {
+      $presentes = 0;
+      $ausentes = 0;
+      foreach ($alumnos_out as $al) {
+        $v = $al['dias'][$fecha] ?? null;
+        if ($v === 1 || $v === '1') $presentes += 1;
+        elseif ($v === 0 || $v === '0') $ausentes += 1;
+      }
+      $dias_map[$fecha]['presentes'] = $presentes;
+      $dias_map[$fecha]['ausentes'] = $ausentes;
+      $dias_map[$fecha]['total'] = $presentes + $ausentes;
+      $dias_map[$fecha]['indice'] = $idx + 1;
+      $dias_out[] = $dias_map[$fecha];
+    }
+
+    $response = self::ok([
+      'curso' => ['id' => $curso_id, 'nombre' => $curso_nombre],
+      'grupo' => $filter_grupo ? ['id' => $filter_grupo, 'nombre' => $grupo_nombre] : null,
+      'materia' => $materia_id ? ['id' => $materia_id, 'nombre' => $materia_nombre] : null,
+      'fecha_desde' => $fecha_desde,
+      'fecha_hasta' => $fecha_hasta,
+      'total_clases' => count($fechas),
+      'total_alumnos' => count($alumnos_out),
+      'dias' => $dias_out,
+      'alumnos' => $alumnos_out,
+    ]);
+    $response->header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    $response->header('Pragma', 'no-cache');
+    return $response;
+  }
+
+  /** Alumnos del curso (y grupo/materia si aplica) para el reporte de periodo. */
+  private static function alumnos_para_reporte_periodo(int $curso_id, ?int $grupo_id, ?int $materia_id): array {
+    global $wpdb;
+    $t_al = $wpdb->prefix . 'conducta_alumnos';
+    $t_aul = NC_DB::table_grupos();
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+    $t_am = $wpdb->prefix . 'conducta_alumno_materias';
+
+    $has_grupo_col = ((int) $wpdb->get_var($wpdb->prepare(
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'grupo_id'",
+      $t_al
+    ))) > 0;
+    $use_rel_aulas = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+    $use_rel_cursos = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
+    $use_materias = $materia_id && ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_am) . "'") === $t_am);
+
+    $where = 'a.activo=1';
+    $params = [];
+
+    $where .= ' AND (a.curso_id=%d';
+    $params[] = $curso_id;
+    if ($use_rel_cursos) {
+      $where .= " OR EXISTS (SELECT 1 FROM $t_al_c ac WHERE ac.alumno_id=a.id AND ac.curso_id=%d AND ac.activo=1)";
+      $params[] = $curso_id;
+    }
+    $where .= ')';
+
+    $cna_grupo_ids = [];
+    if (!$grupo_id && self::is_cna_curso_id($curso_id)) {
+      $cna_grupo_ids = self::cna_grupo_ids();
+    }
+    if ($cna_grupo_ids) {
+      self::append_alumno_en_grupos_where($where, $params, $cna_grupo_ids, 'a', $has_grupo_col, $use_rel_aulas, $t_al_a);
+    } elseif ($grupo_id) {
+      if ($has_grupo_col && $use_rel_aulas) {
+        $where .= " AND (a.grupo_id=%d OR a.aula_id=%d OR EXISTS (SELECT 1 FROM $t_al_a ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))";
+        $params[] = $grupo_id;
+        $params[] = $grupo_id;
+        $params[] = $grupo_id;
+      } elseif ($has_grupo_col) {
+        $where .= ' AND (a.grupo_id=%d OR a.aula_id=%d)';
+        $params[] = $grupo_id;
+        $params[] = $grupo_id;
+      } elseif ($use_rel_aulas) {
+        $where .= " AND (a.aula_id=%d OR EXISTS (SELECT 1 FROM $t_al_a ag WHERE ag.alumno_id=a.id AND ag.aula_id=%d AND ag.activo=1))";
+        $params[] = $grupo_id;
+        $params[] = $grupo_id;
+      } else {
+        $where .= ' AND a.aula_id=%d';
+        $params[] = $grupo_id;
+      }
+    }
+
+    if ($use_materias) {
+      $enrolled = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $t_am WHERE materia_id=%d",
+        $materia_id
+      ));
+      if ($enrolled > 0) {
+        $where .= " AND EXISTS (SELECT 1 FROM $t_am am WHERE am.alumno_id=a.id AND am.materia_id=%d)";
+        $params[] = $materia_id;
+      }
+    }
+
+    $rel_group_expr = $use_rel_aulas
+      ? "(SELECT ag2.aula_id FROM $t_al_a ag2 INNER JOIN $t_aul au2 ON au2.id=ag2.aula_id WHERE ag2.alumno_id=a.id AND ag2.activo=1 AND au2.activo=1 ORDER BY ag2.id DESC LIMIT 1)"
+      : 'NULL';
+    if ($has_grupo_col) {
+      $join_group_expr = $use_rel_aulas
+        ? "COALESCE(a.grupo_id, a.aula_id, $rel_group_expr)"
+        : 'COALESCE(a.grupo_id, a.aula_id)';
+    } else {
+      $join_group_expr = $use_rel_aulas ? "COALESCE(a.aula_id, $rel_group_expr)" : 'a.aula_id';
+    }
+
+    $sql = "SELECT a.id, a.nombres, a.apellidos, a.ci, au.nombre AS grupo_nombre
+            FROM $t_al a
+            LEFT JOIN $t_aul au ON au.id=$join_group_expr
+            WHERE $where
+            ORDER BY a.apellidos ASC, a.nombres ASC";
+    return $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A) ?: [];
+  }
+
   // ---------------- Lista alumnos (con promedio asistencia) ----------------
 
   public static function lista_alumnos(WP_REST_Request $req) {
@@ -1509,7 +1954,7 @@ class NC_Rest_Asistencia {
     global $wpdb;
     $t_al = $wpdb->prefix . 'conducta_alumnos';
     $t_cur = $wpdb->prefix . 'conducta_cursos';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
@@ -1520,6 +1965,13 @@ class NC_Rest_Asistencia {
     $search = self::norm_str($req->get_param('search'));
     $subgrupo = trim(sanitize_text_field((string) ($req->get_param('subgrupo') ?? '')));
     $materia_id = self::int_or_null($req->get_param('materia_id'));
+    $fecha_desde = self::req_query_str($req, 'fecha_desde');
+    $fecha_hasta = self::req_query_str($req, 'fecha_hasta');
+    if ($fecha_desde !== '' && !self::parse_ymd_date($fecha_desde)) $fecha_desde = '';
+    if ($fecha_hasta !== '' && !self::parse_ymd_date($fecha_hasta)) $fecha_hasta = '';
+    if ($fecha_desde !== '' && $fecha_hasta !== '' && $fecha_desde > $fecha_hasta) {
+      return self::err('La fecha «Desde» no puede ser posterior a «Hasta».');
+    }
 
     $where = 'a.activo=1';
     $params = [];
@@ -1606,15 +2058,20 @@ class NC_Rest_Asistencia {
 
     $alumno_ids = array_column($alumnos, 'id');
     $ph = implode(',', array_map('intval', $alumno_ids));
-    $stats = $wpdb->get_results(
-      "SELECT i.alumno_id, COUNT(*) AS total_clases, COALESCE(SUM(COALESCE(m.asistio, i.asistio)), 0) AS asistidas
+    $stats_where = "i.alumno_id IN ($ph)";
+    $stats_params = [];
+    if ($fecha_desde !== '') { $stats_where .= ' AND s.fecha>=%s'; $stats_params[] = $fecha_desde; }
+    if ($fecha_hasta !== '') { $stats_where .= ' AND s.fecha<=%s'; $stats_params[] = $fecha_hasta; }
+    if ($materia_id) { $stats_where .= ' AND s.materia_id=%d'; $stats_params[] = $materia_id; }
+    $stats_sql = "SELECT i.alumno_id, COUNT(*) AS total_clases, COALESCE(SUM(COALESCE(m.asistio, i.asistio)), 0) AS asistidas
        FROM $t_items i
        LEFT JOIN $t_mod m ON m.asistencia_id = i.asistencia_id AND m.asistencia_item_id = i.id
        INNER JOIN $t_asis s ON s.id=i.asistencia_id AND s.activo=1
-       WHERE i.alumno_id IN ($ph)
-       GROUP BY i.alumno_id",
-      ARRAY_A
-    );
+       WHERE $stats_where
+       GROUP BY i.alumno_id";
+    $stats = $stats_params
+      ? $wpdb->get_results($wpdb->prepare($stats_sql, $stats_params), ARRAY_A)
+      : $wpdb->get_results($stats_sql, ARRAY_A);
     $stats_by_id = [];
     foreach ($stats as $s) { $stats_by_id[(int)$s['alumno_id']] = [(int)$s['total_clases'], (int)$s['asistidas']]; }
     foreach ($alumnos as &$a) {
@@ -1706,7 +2163,8 @@ class NC_Rest_Asistencia {
     $alumno_ids = array_map('intval', $alumno_ids ?: []);
     $inscritos = 0;
     foreach ($alumno_ids as $aid) {
-      $out = self::sync_alumno_materias((int) $aid, $curso_id, null, true);
+      // Append: no borrar materias de otros cursos/grupos del alumno.
+      $out = self::sync_alumno_materias((int) $aid, $curso_id, null, false);
       $inscritos += (int) ($out['inserted'] ?? 0);
     }
     return self::ok(['inscritos' => $inscritos, 'alumnos' => count($alumno_ids)]);
@@ -1770,6 +2228,64 @@ class NC_Rest_Asistencia {
     return in_array('nu', $tokens, true) || in_array('n', $tokens, true);
   }
 
+  private static function is_cna_curso_nombre($curso_nombre): bool {
+    $tokens = self::normalize_text_tokens($curso_nombre);
+    return $tokens === ['cna'];
+  }
+
+  private static function is_cna_curso_id(int $curso_id): bool {
+    return $curso_id > 0 && self::is_cna_curso_nombre(self::curso_nombre_by_id($curso_id));
+  }
+
+  /** Solo CNA Presencial y CNA Virtual pertenecen al curso CNA. */
+  private static function is_cna_grupo_nombre($grupo_nombre): bool {
+    $tokens = self::normalize_text_tokens($grupo_nombre);
+    if (!in_array('cna', $tokens, true)) return false;
+    return in_array('presencial', $tokens, true) || in_array('virtual', $tokens, true);
+  }
+
+  private static function cna_grupo_ids(): array {
+    global $wpdb;
+    $t_aul = NC_DB::table_grupos();
+    $rows = $wpdb->get_results("SELECT id, nombre FROM $t_aul WHERE activo=1", ARRAY_A) ?: [];
+    $ids = [];
+    foreach ($rows as $r) {
+      if (self::is_cna_grupo_nombre($r['nombre'] ?? '')) {
+        $ids[] = (int) ($r['id'] ?? 0);
+      }
+    }
+    return array_values(array_unique(array_filter($ids)));
+  }
+
+  private static function append_alumno_en_grupos_where(
+    string &$where,
+    array &$params,
+    array $grupo_ids,
+    string $al_alias,
+    bool $has_grupo_col,
+    bool $use_rel_aulas,
+    string $t_al_a
+  ): void {
+    $grupo_ids = array_values(array_unique(array_filter(array_map('intval', $grupo_ids))));
+    if (!$grupo_ids) {
+      $where .= ' AND 1=0';
+      return;
+    }
+    $ph = implode(',', array_fill(0, count($grupo_ids), '%d'));
+    $parts = [];
+    if ($has_grupo_col) {
+      $parts[] = "$al_alias.grupo_id IN ($ph)";
+      $params = array_merge($params, $grupo_ids);
+    }
+    $parts[] = "$al_alias.aula_id IN ($ph)";
+    $params = array_merge($params, $grupo_ids);
+    if ($use_rel_aulas) {
+      $parts[] = "EXISTS (SELECT 1 FROM $t_al_a ag WHERE ag.alumno_id=$al_alias.id AND ag.aula_id IN ($ph) AND ag.activo=1)";
+      $params = array_merge($params, $grupo_ids);
+    }
+    $where .= ' AND (' . implode(' OR ', $parts) . ')';
+  }
+
   private static function materia_name_contains_any($materia_nombre, array $needles): bool {
     $name = self::normalize_text_key($materia_nombre);
     if ($name === '') return false;
@@ -1825,12 +2341,241 @@ class NC_Rest_Asistencia {
     $aula_id = is_numeric($aula_id) ? (int) $aula_id : 0;
     if ($aula_id <= 0) return 0;
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $curso_id = (int) $wpdb->get_var($wpdb->prepare(
       "SELECT curso_id FROM $t_aul WHERE id=%d LIMIT 1",
       $aula_id
     ));
     return $curso_id > 0 ? $curso_id : 0;
+  }
+
+  private static function get_cursos_catalog(): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    global $wpdb;
+    $t_cur = $wpdb->prefix . 'conducta_cursos';
+    $rows = $wpdb->get_results(
+      "SELECT id, nombre, created_at FROM $t_cur ORDER BY CHAR_LENGTH(nombre) DESC, nombre ASC",
+      ARRAY_A
+    );
+    $cache = is_array($rows) ? $rows : [];
+    return $cache;
+  }
+
+  private static function curso_nombre_by_id(int $curso_id): string {
+    if ($curso_id <= 0) return '';
+    foreach (self::get_cursos_catalog() as $c) {
+      if ((int) ($c['id'] ?? 0) === $curso_id) {
+        return trim((string) ($c['nombre'] ?? ''));
+      }
+    }
+    return '';
+  }
+
+  private static function ymd_from_datetime($value): string {
+    $raw = trim((string) $value);
+    if ($raw === '') return '';
+    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $raw, $m)) {
+      return $m[1];
+    }
+    return '';
+  }
+
+  private static function curso_created_ymd_by_id(int $curso_id): string {
+    if ($curso_id <= 0) return '';
+    foreach (self::get_cursos_catalog() as $c) {
+      if ((int) ($c['id'] ?? 0) === $curso_id) {
+        return self::ymd_from_datetime($c['created_at'] ?? '');
+      }
+    }
+    return '';
+  }
+
+  /** True si la sesión es de esa fecha o posterior a la creación del curso. */
+  private static function sesion_fecha_desde_curso(string $fecha, int $curso_id): bool {
+    $created = self::curso_created_ymd_by_id($curso_id);
+    if ($created === '' || $fecha === '') return true;
+    return $fecha >= $created;
+  }
+
+  /**
+   * Si el nombre del grupo incluye el de un curso (p. ej. "CNA Presencial"),
+   * devuelve ese curso. CNA solo coincide con CNA Presencial y CNA Virtual.
+   */
+  private static function match_curso_id_from_grupo_nombre($grupo_nombre): ?int {
+    $tokens = self::normalize_text_tokens($grupo_nombre);
+    if (empty($tokens)) return null;
+    $token_set = array_fill_keys($tokens, true);
+    $best_id = null;
+    $best_len = 0;
+    foreach (self::get_cursos_catalog() as $c) {
+      $curso_nombre = (string) ($c['nombre'] ?? '');
+      if (self::is_cna_curso_nombre($curso_nombre)) {
+        if (!self::is_cna_grupo_nombre($grupo_nombre)) continue;
+        $len = 1000;
+        if ($len > $best_len) {
+          $best_len = $len;
+          $best_id = (int) ($c['id'] ?? 0);
+        }
+        continue;
+      }
+      $ct = self::normalize_text_tokens($curso_nombre);
+      if (empty($ct)) continue;
+      $all = true;
+      foreach ($ct as $t) {
+        if ($t === '' || !isset($token_set[$t])) {
+          $all = false;
+          break;
+        }
+      }
+      if (!$all) continue;
+      $len = strlen(implode('', $ct));
+      if ($len > $best_len) {
+        $best_len = $len;
+        $best_id = (int) ($c['id'] ?? 0);
+      }
+    }
+    return ($best_id && $best_id > 0) ? $best_id : null;
+  }
+
+  /**
+   * Curso de una sesión: primero el del grupo (nombre o aula.curso_id).
+   * No usar LIMIT 1 sobre materias compartidas entre CNA/CEA.
+   */
+  private static function resolve_curso_id_for_asistencia(?int $grupo_id, ?int $aula_id, ?int $materia_id, ?int $hint_curso_id): ?int {
+    global $wpdb;
+    $grupo_id = $grupo_id ? (int) $grupo_id : 0;
+    $aula_id = $aula_id ? (int) $aula_id : 0;
+    $materia_id = $materia_id ? (int) $materia_id : 0;
+    $hint_curso_id = $hint_curso_id ? (int) $hint_curso_id : 0;
+    $aula_ref = $grupo_id ?: $aula_id;
+
+    $aula_nombre = '';
+    $aula_curso_id = 0;
+    if ($aula_ref > 0) {
+      $t_aul = NC_DB::table_grupos();
+      $aula = $wpdb->get_row($wpdb->prepare(
+        "SELECT nombre, curso_id FROM $t_aul WHERE id=%d LIMIT 1",
+        $aula_ref
+      ), ARRAY_A);
+      if (is_array($aula)) {
+        $aula_nombre = (string) ($aula['nombre'] ?? '');
+        $aula_curso_id = (int) ($aula['curso_id'] ?? 0);
+      }
+    }
+
+    $by_name = self::match_curso_id_from_grupo_nombre($aula_nombre);
+    if ($by_name) return $by_name;
+    if ($aula_curso_id > 0) {
+      if (!(self::is_cna_curso_id($aula_curso_id) && !self::is_cna_grupo_nombre($aula_nombre))) {
+        return $aula_curso_id;
+      }
+    }
+
+    $candidates = [];
+    if ($materia_id > 0 && $aula_ref > 0) {
+      $candidates = self::curso_ids_from_materia_grupo($materia_id, $aula_ref);
+    }
+    $majority = $aula_ref > 0 ? self::majority_curso_id_in_grupo($aula_ref) : null;
+
+    if ($candidates) {
+      if ($majority && in_array($majority, $candidates, true)) return $majority;
+      if ($hint_curso_id > 0 && in_array($hint_curso_id, $candidates, true)) return $hint_curso_id;
+      if (count($candidates) === 1) return $candidates[0];
+      sort($candidates, SORT_NUMERIC);
+      return $candidates[0];
+    }
+
+    if ($majority) return $majority;
+    if ($hint_curso_id > 0) return $hint_curso_id;
+
+    $legacy = $aula_ref > 0 ? self::majority_legacy_curso_id_in_grupo($aula_ref) : null;
+    return $legacy ?: null;
+  }
+
+  private static function curso_ids_from_materia_grupo(int $materia_id, int $grupo_id): array {
+    global $wpdb;
+    $t_cm = $wpdb->prefix . 'conducta_curso_materias';
+    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+    $t_al = $wpdb->prefix . 'conducta_alumnos';
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_cm) . "'") !== $t_cm) return [];
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") !== $t_al_c) return [];
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") !== $t_al_a) return [];
+
+    $ids = $wpdb->get_col($wpdb->prepare(
+      "SELECT DISTINCT cm.curso_id
+       FROM $t_cm cm
+       WHERE cm.materia_id = %d
+         AND EXISTS (
+           SELECT 1
+           FROM $t_al_a ag
+           INNER JOIN $t_al_c ac ON ac.alumno_id = ag.alumno_id AND ac.curso_id = cm.curso_id AND ac.activo = 1
+           INNER JOIN $t_al al ON al.id = ag.alumno_id AND al.activo = 1
+           WHERE ag.aula_id = %d AND ag.activo = 1
+         )
+       ORDER BY cm.curso_id ASC",
+      $materia_id,
+      $grupo_id
+    ));
+    $out = [];
+    foreach ($ids ?: [] as $id) {
+      $id = (int) $id;
+      if ($id > 0) $out[] = $id;
+    }
+    return array_values(array_unique($out));
+  }
+
+  private static function majority_curso_id_in_grupo(int $grupo_id): ?int {
+    global $wpdb;
+    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+    $t_al = $wpdb->prefix . 'conducta_alumnos';
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") !== $t_al_c) return null;
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") !== $t_al_a) return null;
+
+    $id = (int) $wpdb->get_var($wpdb->prepare(
+      "SELECT ac.curso_id
+       FROM $t_al_a ag
+       INNER JOIN $t_al_c ac ON ac.alumno_id = ag.alumno_id AND ac.activo = 1
+       INNER JOIN $t_al al ON al.id = ag.alumno_id AND al.activo = 1
+       WHERE ag.aula_id = %d AND ag.activo = 1 AND ac.curso_id IS NOT NULL AND ac.curso_id <> 0
+       GROUP BY ac.curso_id
+       ORDER BY COUNT(*) DESC, ac.curso_id ASC
+       LIMIT 1",
+      $grupo_id
+    ));
+    return $id > 0 ? $id : null;
+  }
+
+  private static function majority_legacy_curso_id_in_grupo(int $grupo_id): ?int {
+    global $wpdb;
+    $t_al = $wpdb->prefix . 'conducta_alumnos';
+    $has_grupo_col = ((int) $wpdb->get_var($wpdb->prepare(
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'grupo_id'",
+      $t_al
+    ))) > 0;
+    if ($has_grupo_col) {
+      $id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT curso_id FROM $t_al
+         WHERE activo=1 AND curso_id IS NOT NULL AND curso_id <> 0 AND (grupo_id=%d OR aula_id=%d)
+         GROUP BY curso_id
+         ORDER BY COUNT(*) DESC, curso_id ASC
+         LIMIT 1",
+        $grupo_id,
+        $grupo_id
+      ));
+    } else {
+      $id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT curso_id FROM $t_al
+         WHERE activo=1 AND curso_id IS NOT NULL AND curso_id <> 0 AND aula_id=%d
+         GROUP BY curso_id
+         ORDER BY COUNT(*) DESC, curso_id ASC
+         LIMIT 1",
+        $grupo_id
+      ));
+    }
+    return $id > 0 ? $id : null;
   }
 
   private static function detect_cea_carrera_category($facultad_nombre, $carrera_nombre): ?string {
@@ -2151,7 +2896,7 @@ class NC_Rest_Asistencia {
     }
     // Regla explícita solicitada para grupo Nu.
     if ($aula_id > 0) {
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $aula_nombre = (string) $wpdb->get_var($wpdb->prepare("SELECT nombre FROM $t_aul WHERE id=%d LIMIT 1", $aula_id));
       if (self::is_nu_group_name($aula_nombre)) {
         $nu_ids = self::materia_ids_for_nu_bundle();
@@ -2222,6 +2967,163 @@ class NC_Rest_Asistencia {
   /** Inscribe un alumno en materias del curso. */
   public static function auto_inscribir_alumno_curso_materias($alumno_id, $curso_id, $aula_id = null, $replace_existing = false) {
     self::sync_alumno_materias($alumno_id, $curso_id, $aula_id, (bool) $replace_existing);
+  }
+
+  /**
+   * Unión de materias auto-resolubles según las membresías activas del alumno
+   * (cursos y grupos), opcionalmente excluyendo un curso/aula recién desvinculado.
+   */
+  public static function collect_alumno_membership_materia_ids(
+    int $alumno_id,
+    $exclude_curso_id = null,
+    $exclude_aula_id = null
+  ): array {
+    if ($alumno_id <= 0) return [];
+    global $wpdb;
+    $exclude_curso_id = is_numeric($exclude_curso_id) ? (int) $exclude_curso_id : 0;
+    $exclude_aula_id = is_numeric($exclude_aula_id) ? (int) $exclude_aula_id : 0;
+
+    $ctx = self::resolve_alumno_auto_context($alumno_id);
+    $facultad_nombre = (string) ($ctx['facultad_nombre'] ?? '');
+    $carrera_nombre = (string) ($ctx['carrera_nombre'] ?? '');
+
+    $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+    $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+    $t_cur = $wpdb->prefix . 'conducta_cursos';
+    $t_aul = NC_DB::table_grupos();
+    $has_rel_c = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
+    $has_rel_a = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+
+    $curso_ids = [];
+    if ($has_rel_c) {
+      $curso_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT ac.curso_id
+         FROM $t_al_c ac
+         INNER JOIN $t_cur c ON c.id=ac.curso_id
+         WHERE ac.alumno_id=%d AND ac.activo=1 AND c.activo=1",
+        $alumno_id
+      ));
+    }
+    $curso_ids = array_values(array_unique(array_filter(array_map('intval', $curso_ids ?: []), static function ($id) {
+      return $id > 0;
+    })));
+    if (empty($curso_ids)) {
+      $legacy = (int) ($ctx['curso_id'] ?? 0);
+      if ($legacy > 0) $curso_ids[] = $legacy;
+    }
+    if ($exclude_curso_id > 0) {
+      $curso_ids = array_values(array_filter($curso_ids, static function ($id) use ($exclude_curso_id) {
+        return (int) $id !== $exclude_curso_id;
+      }));
+    }
+
+    $aula_ids = [];
+    if ($has_rel_a) {
+      $aula_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT ag.aula_id
+         FROM $t_al_a ag
+         INNER JOIN $t_aul au ON au.id=ag.aula_id
+         WHERE ag.alumno_id=%d AND ag.activo=1 AND au.activo=1",
+        $alumno_id
+      ));
+    }
+    $aula_ids = array_values(array_unique(array_filter(array_map('intval', $aula_ids ?: []), static function ($id) {
+      return $id > 0;
+    })));
+    if (empty($aula_ids)) {
+      $legacy_aula = (int) ($ctx['aula_id'] ?? 0);
+      if ($legacy_aula > 0) $aula_ids[] = $legacy_aula;
+    }
+    if ($exclude_aula_id > 0) {
+      $aula_ids = array_values(array_filter($aula_ids, static function ($id) use ($exclude_aula_id) {
+        return (int) $id !== $exclude_aula_id;
+      }));
+    }
+
+    $materia_ids = [];
+    foreach ($curso_ids as $cid) {
+      $materia_ids = array_merge(
+        $materia_ids,
+        self::resolve_auto_materia_ids($alumno_id, (int) $cid, 0, $facultad_nombre, $carrera_nombre)
+      );
+    }
+    foreach ($aula_ids as $aid) {
+      $cid = self::resolve_curso_id_from_aula((int) $aid);
+      $materia_ids = array_merge(
+        $materia_ids,
+        self::resolve_auto_materia_ids($alumno_id, $cid, (int) $aid, $facultad_nombre, $carrera_nombre)
+      );
+    }
+
+    return array_values(array_unique(array_filter(array_map('intval', $materia_ids), static function ($id) {
+      return $id > 0;
+    })));
+  }
+
+  /**
+   * Tras desvincular un curso o grupo: desinscribe solo las materias que
+   * ya no están justificadas por ninguna membresía restante.
+   */
+  public static function unenroll_alumno_from_membership(
+    $alumno_id,
+    $removed_curso_id = null,
+    $removed_aula_id = null
+  ): array {
+    self::ensure_tables();
+    $alumno_id = is_numeric($alumno_id) ? (int) $alumno_id : 0;
+    $removed_curso_id = is_numeric($removed_curso_id) ? (int) $removed_curso_id : 0;
+    $removed_aula_id = is_numeric($removed_aula_id) ? (int) $removed_aula_id : 0;
+    if ($alumno_id <= 0 || ($removed_curso_id <= 0 && $removed_aula_id <= 0)) {
+      return ['removed' => 0, 'materia_ids' => []];
+    }
+
+    $ctx = self::resolve_alumno_auto_context($alumno_id);
+    $facultad_nombre = (string) ($ctx['facultad_nombre'] ?? '');
+    $carrera_nombre = (string) ($ctx['carrera_nombre'] ?? '');
+
+    // Para resolver materias del vínculo removido, el aula puede implicar su curso.
+    $curso_for_resolve = $removed_curso_id;
+    if ($curso_for_resolve <= 0 && $removed_aula_id > 0) {
+      $curso_for_resolve = self::resolve_curso_id_from_aula($removed_aula_id);
+    }
+
+    $removed_ids = self::resolve_auto_materia_ids(
+      $alumno_id,
+      $curso_for_resolve,
+      $removed_aula_id,
+      $facultad_nombre,
+      $carrera_nombre
+    );
+    if (empty($removed_ids)) {
+      return ['removed' => 0, 'materia_ids' => []];
+    }
+
+    // Excluir solo lo que se desvinculó (no el curso “padre” de un aula si el curso sigue activo).
+    $keep_ids = self::collect_alumno_membership_materia_ids(
+      $alumno_id,
+      $removed_curso_id > 0 ? $removed_curso_id : null,
+      $removed_aula_id > 0 ? $removed_aula_id : null
+    );
+    $keep_map = array_fill_keys($keep_ids, true);
+    $to_delete = array_values(array_filter($removed_ids, static function ($mid) use ($keep_map) {
+      return empty($keep_map[(int) $mid]);
+    }));
+    if (empty($to_delete)) {
+      return ['removed' => 0, 'materia_ids' => []];
+    }
+
+    global $wpdb;
+    $t_am = $wpdb->prefix . 'conducta_alumno_materias';
+    if ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_am) . "'") !== $t_am) {
+      return ['removed' => 0, 'materia_ids' => []];
+    }
+    $placeholders = implode(',', array_fill(0, count($to_delete), '%d'));
+    $params = array_merge([$alumno_id], $to_delete);
+    $deleted = $wpdb->query($wpdb->prepare(
+      "DELETE FROM $t_am WHERE alumno_id=%d AND materia_id IN ($placeholders)",
+      $params
+    ));
+    return ['removed' => (int) $deleted, 'materia_ids' => $to_delete];
   }
 
   /** GET /asistencia/materias/:id/alumnos — IDs de alumnos inscritos en una materia (CASS). */
@@ -2377,7 +3279,7 @@ class NC_Rest_Asistencia {
     $t_am   = $wpdb->prefix . 'conducta_alumno_materias';
     $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_mat  = $wpdb->prefix . 'conducta_materias';
     $t_fac  = $wpdb->prefix . 'conducta_facultades';
     $t_car  = $wpdb->prefix . 'conducta_carreras';
@@ -2435,8 +3337,10 @@ class NC_Rest_Asistencia {
   public static function historial_alumno(WP_REST_Request $req) {
     global $wpdb;
     $alumno_id = (int) $req['id'];
-    $fecha_desde = self::norm_str($req->get_param('fecha_desde'));
-    $fecha_hasta = self::norm_str($req->get_param('fecha_hasta'));
+    $fecha_desde = self::req_query_str($req, 'fecha_desde');
+    $fecha_hasta = self::req_query_str($req, 'fecha_hasta');
+    if ($fecha_desde !== '' && !self::parse_ymd_date($fecha_desde)) $fecha_desde = '';
+    if ($fecha_hasta !== '' && !self::parse_ymd_date($fecha_hasta)) $fecha_hasta = '';
 
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
     $t_mod  = $wpdb->prefix . 'conducta_asistencia_modificaciones';
@@ -2558,7 +3462,7 @@ class NC_Rest_Asistencia {
     }
 
     $inner = new WP_REST_Request('GET', '');
-    foreach (['aula_id', 'curso_id', 'materia_id', 'search', 'subgrupo'] as $p) {
+    foreach (['aula_id', 'curso_id', 'materia_id', 'search', 'subgrupo', 'fecha_desde', 'fecha_hasta'] as $p) {
       $v = $req->get_param($p);
       if ($v !== null && $v !== '') {
         $inner->set_param($p, $v);
@@ -2693,7 +3597,7 @@ class NC_Rest_Asistencia {
     $aula_id_param = self::int_or_null($req->get_param('aula_id'));
     if ($aula_id_param) {
       global $wpdb;
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $n = $wpdb->get_var($wpdb->prepare("SELECT nombre FROM $t_aul WHERE id=%d", $aula_id_param));
       if (!empty($n)) {
         $aula_nombre = (string) $n;
@@ -2915,7 +3819,7 @@ class NC_Rest_Asistencia {
     global $wpdb;
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_mat = $wpdb->prefix . 'conducta_materias';
     $aula_nombre = $wpdb->get_var($wpdb->prepare("SELECT nombre FROM $t_aul WHERE id=%d", $aula_id));
 
@@ -3025,7 +3929,7 @@ class NC_Rest_Asistencia {
     global $wpdb;
     $t_asis = $wpdb->prefix . 'conducta_asistencias';
     $t_items = $wpdb->prefix . 'conducta_asistencia_items';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_mat = $wpdb->prefix . 'conducta_materias';
     $aula_nombre = $wpdb->get_var($wpdb->prepare("SELECT nombre FROM $t_aul WHERE id=%d", $aula_id));
 
@@ -3306,7 +4210,7 @@ class NC_Rest_Asistencia {
     global $wpdb;
     $t = $wpdb->prefix . 'conducta_simulacros';
     $t_m = $wpdb->prefix . 'conducta_materias';
-    $t_a = $wpdb->prefix . 'conducta_aulas';
+    $t_a = NC_DB::table_grupos();
     if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) {
       return self::ok(['items' => []]);
     }
@@ -3332,7 +4236,7 @@ class NC_Rest_Asistencia {
     $id = (int) $req['id'];
     $t = $wpdb->prefix . 'conducta_simulacros';
     $t_m = $wpdb->prefix . 'conducta_materias';
-    $t_a = $wpdb->prefix . 'conducta_aulas';
+    $t_a = NC_DB::table_grupos();
     $t_al = $wpdb->prefix . 'conducta_alumnos';
     $t_sa = $wpdb->prefix . 'conducta_simulacro_alumnos';
 
@@ -3404,7 +4308,7 @@ class NC_Rest_Asistencia {
       return self::err('La materia seleccionada no es un examen válido.');
     }
 
-    $t_a = $wpdb->prefix . 'conducta_aulas';
+    $t_a = NC_DB::table_grupos();
     $aula = $wpdb->get_row($wpdb->prepare("SELECT id, nombre FROM $t_a WHERE id=%d", $aula_id), ARRAY_A);
     if (!$aula) {
       return self::err('Aula física no encontrada.', 404);

@@ -242,6 +242,22 @@
     return raw.indexOf('->') !== -1 ? raw.split('->')[1].trim() : raw;
   }
 
+  function normalizeGrupoKey(s) {
+    let t = String(s || '').toLowerCase().trim();
+    try { t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (_) { /* ignore */ }
+    return t.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isCnaCursoNombre(nombre) {
+    return normalizeGrupoKey(nombre) === 'cna';
+  }
+
+  function isCnaGrupoNombre(nombre) {
+    const tokens = normalizeGrupoKey(aulaGrupoOptionLabel({ nombre: nombre })).split(' ').filter(Boolean);
+    if (tokens.indexOf('cna') === -1) return false;
+    return tokens.indexOf('presencial') !== -1 || tokens.indexOf('virtual') !== -1;
+  }
+
   // ✨ NUEVAS FUNCIONES: Actualizar dinámicamente presentes
   /**
    * Obtiene el total actualizado de presentes para una sesión
@@ -307,6 +323,7 @@
     { id: 'simulacro', label: 'Simulacro' },
     { id: 'mis-asistencias', label: 'Mis asistencias registradas' },
     { id: 'reportes', label: 'Reportes' },
+    { id: 'reporte-periodo', label: 'Reporte de periodo' },
     { id: 'lista-alumnos', label: 'Lista de alumnos' },
     { id: 'materias', label: 'Materias' },
   ];
@@ -374,7 +391,19 @@
         .nc-asis-marcar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
         #nc-asis-marcar-table { width: 100%; table-layout: fixed; border-collapse: collapse; min-width: 0; }
         #nc-asis-marcar-table th, #nc-asis-marcar-table td { padding: 8px 6px; vertical-align: middle; overflow-wrap: anywhere; word-break: break-word; }
+        .nc-asistencia-content .nc-field input[type="checkbox"],
+        .nc-asistencia-content .nc-asis-chk-label input[type="checkbox"] {
+          width: auto !important; min-width: 16px; height: 16px; padding: 0 !important; flex-shrink: 0;
+        }
+        .nc-asistencia-content .nc-asis-chk-label,
+        .nc-asistencia-content .nc-field .nc-asis-chk-label {
+          display: flex; align-items: center; gap: 8px; user-select: none; cursor: pointer;
+          font-size: 13px; font-weight: 500; margin: 0; color: #333;
+        }
         #nc-asis-marcar-table .nc-asis-col-num { width: 2.25em; text-align: center; padding-left: 2px; padding-right: 2px; }
+        #nc-asis-marcar-table.nc-asis-hide-num .nc-asis-col-num { display: none; }
+        #nc-asis-marcar-table.nc-asis-hide-num .nc-asis-col-nombre,
+        #nc-asis-marcar-table.nc-asis-hide-num .nc-asis-col-apellido { width: 38%; }
         #nc-asis-marcar-table .nc-asis-col-nombre,
         #nc-asis-marcar-table .nc-asis-col-apellido { width: 22%; }
         #nc-asis-marcar-table .nc-asis-col-asistio { width: 58px; text-align: center; white-space: nowrap; padding-right: 10px; }
@@ -388,11 +417,33 @@
           #nc-asis-marcar-table .nc-asis-col-nombre,
           #nc-asis-marcar-table .nc-asis-col-apellido { width: 30%; }
           #nc-asis-marcar-table .nc-asis-col-asistio { width: 52px; padding-right: 14px; }
+          #nc-asis-marcar-table.nc-asis-hide-num .nc-asis-col-asistio { width: 58px; padding-right: 16px; }
           #nc-asis-marcar-table .nc-asis-col-obs { width: 18%; }
           #nc-asis-marcar-table .nc-asis-obs { font-size: 12px; padding: 4px 6px !important; }
           .nc-asistencia-content .nc-toggle-switch { width: 42px; height: 22px; }
           .nc-asistencia-content .nc-toggle-slider:before { height: 16px; width: 16px; }
           .nc-asistencia-content .nc-toggle-switch input:checked + .nc-toggle-slider:before { transform: translateX(20px); }
+        }
+        .nc-rep-periodo-meta { display:flex; flex-wrap:wrap; gap:12px 28px; margin-bottom:18px; padding:14px 16px; background:#f5f7ff; border:1px solid #e0e7ff; border-radius:8px; }
+        .nc-rep-periodo-meta-item .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#6b6f80; margin-bottom:2px; }
+        .nc-rep-periodo-meta-item .val { font-size:15px; font-weight:600; color:#222; }
+        .nc-rep-periodo-legend { display:flex; gap:16px; align-items:center; font-size:13px; color:#444; margin:0 0 12px; }
+        .nc-rep-periodo-swatch { width:12px; height:12px; border-radius:3px; display:inline-block; margin-right:6px; vertical-align:middle; }
+        .nc-rep-periodo-pies { display:flex; flex-wrap:wrap; gap:18px 22px; justify-content:flex-start; margin: 4px 0 22px; }
+        .nc-rep-periodo-pie { text-align:center; width:136px; }
+        .nc-rep-periodo-pie svg { display:block; margin:0 auto 8px; }
+        .nc-rep-periodo-pie .pie-ratio { font-size:13px; font-weight:600; color:#222; }
+        .nc-rep-periodo-pie .pie-day { font-size:12px; color:#555; margin-top:2px; }
+        .nc-rep-periodo-pie .pie-sub { font-size:11px; color:#888; }
+        .nc-rep-dia-th { writing-mode: vertical-rl; transform: rotate(180deg); font-size:11px; font-weight:600; height:70px; min-width:28px; max-width:36px; text-align:left; padding:6px 4px !important; }
+        .nc-rep-dia-box { width:18px; height:18px; display:inline-block; vertical-align:middle; }
+        #nc-asis-rep-periodo-table .nc-rep-dia-cell { text-align:center; padding:4px 3px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        #nc-asis-rep-periodo-table th, #nc-asis-rep-periodo-table td { white-space:nowrap; }
+        #nc-asis-rep-periodo-table .nc-rep-alum-name { white-space:normal; min-width:140px; }
+        @media print {
+          .nc-asistencia-subtabs, .nc-rep-periodo-toolbar { display:none !important; }
+          .nc-rep-periodo-print { box-shadow:none !important; border:none !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
         .nc-modal-overlay { position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.5) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 99999 !important; padding: 16px !important; overflow-y: auto !important; }
         .nc-modal-overlay .nc-modal { position: relative !important; margin: auto !important; flex-shrink: 0 !important; }
@@ -405,7 +456,7 @@
     const subTabs = el('div', { class: 'nc-tabs nc-asistencia-subtabs' });
     const isAdmin = !!(permissionsCache && permissionsCache.is_admin);
     const canViewReportesAsistencia = !!(permissionsCache && permissionsCache.can_view_reportes_asistencia);
-    const tabsToShow = SUB_TABS.filter(t => (t.id !== 'materias' || isAdmin) && (t.id !== 'reportes' || canViewReportesAsistencia));
+    const tabsToShow = SUB_TABS.filter(t => (t.id !== 'materias' || isAdmin) && ((t.id !== 'reportes' && t.id !== 'reporte-periodo') || canViewReportesAsistencia));
     tabsToShow.forEach(t => {
       const b = el('button', { class: 'nc-tab', 'data-sub': t.id }, t.label);
       b.onclick = () => { setActiveSub(t.id); renderSub(t.id); };
@@ -436,6 +487,7 @@
     if (id === 'simulacro-lista') return renderSimulacroLista();
     if (id === 'mis-asistencias') return renderMisAsistencias();
     if (id === 'reportes') return renderReportes();
+    if (id === 'reporte-periodo') return renderReportePeriodo();
     if (id === 'lista-alumnos') return renderListaAlumnos();
     if (id === 'materias') return renderMaterias();
   }
@@ -746,7 +798,17 @@
   let marcarDraftDirty = false;
   let marcarDraftSaveTimer = null;
   const STORAGE_KEY_MARCAR_DRAFT = 'nc_asistencia_marcar_draft';
+  const STORAGE_KEY_MOSTRAR_NUM = 'nc_asistencia_mostrar_num';
   const MARCAR_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+  function getMostrarNumPref() {
+    try {
+      const v = localStorage.getItem(STORAGE_KEY_MOSTRAR_NUM);
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) { /* ignore */ }
+    return !(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+  }
 
   function getNcUserId() {
     const id = window.NC_APP && window.NC_APP.currentUserId;
@@ -781,6 +843,16 @@
         if (fid > 0) xiIds.push(fid);
       });
     }
+    const capsCarWrap = contentEl && contentEl.querySelector('#nc-asis-caps-car-wrap');
+    const capsIds = [];
+    if (capsCarWrap) {
+      capsCarWrap.querySelectorAll('.nc-asis-caps-car-cb:checked').forEach(cb => {
+        String(cb.getAttribute('data-carrera-ids') || '').split(',').forEach(part => {
+          const cid = Number(String(part).trim());
+          if (cid > 0) capsIds.push(cid);
+        });
+      });
+    }
     const titularId = docenteSel && docenteSel.value ? Number(docenteSel.value) : null;
     const replId = (reemplazanteChk && reemplazanteChk.checked && reemplazanteSel && reemplazanteSel.value)
       ? Number(reemplazanteSel.value)
@@ -805,12 +877,14 @@
       carrera_id: marcarState.carrera_id || null,
       subgrupo: marcarState.subgrupo || null,
       sortBy: marcarState.sortBy || 'apellido',
+      otra_materia: !!(contentEl && contentEl.querySelector('#nc-asis-otra-materia-chk') && contentEl.querySelector('#nc-asis-otra-materia-chk').checked),
       reemplazante: {
         checked: !!(reemplazanteChk && reemplazanteChk.checked),
         id: reemplazanteSel && reemplazanteSel.value ? Number(reemplazanteSel.value) : null,
         motivo: reemplazanteMotivoInp ? String(reemplazanteMotivoInp.value || '') : '',
       },
       xiFacultadIds: xiIds,
+      capsCarreraIds: capsIds,
       alumnos: (marcarState.alumnos || []).map(a => ({
         id: a.id,
         nombres: a.nombres,
@@ -916,15 +990,17 @@
   async function renderMarcar() {
     if (!isActiveSub('marcar')) return;
     installMarcarLeaveWarning();
-    let materias = [], aulas = [], cursos = [], facultades = [];
+    let materias = [], aulas = [], cursos = [], facultades = [], carreras = [];
     try {
-      const [aulasRes, facRes, docRes] = await Promise.all([
+      const [aulasRes, facRes, docRes, carRes] = await Promise.all([
         api('/aulas'),
         api('/facultades'),
         api('/docentes'),
+        api('/carreras'),
       ]);
       aulas = Array.isArray(aulasRes) ? aulasRes : (aulasRes && aulasRes.items ? aulasRes.items : []);
       facultades = Array.isArray(facRes) ? facRes : (facRes && facRes.items ? facRes.items : []);
+      carreras = Array.isArray(carRes) ? carRes : (carRes && Array.isArray(carRes.items) ? carRes.items : []);
       const docItems = (docRes && docRes.items) ? docRes.items : [];
       window.ncAsisDocentesCache = docItems;
     } catch (_) {}
@@ -946,6 +1022,19 @@
     function isXiGroupName(nombre) {
       const key = normXiKey(nombre);
       return /(^|[^a-z0-9])xi($|[^a-z0-9])/.test(key);
+    }
+    function isCapsName(nombre) {
+      const key = normXiKey(nombre);
+      return /(^|[^a-z0-9])caps($|[^a-z0-9])/.test(key);
+    }
+    function capsCareerBucket(nombre) {
+      let k = normXiKey(nombre).replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+      k = k.replace(/^ing(enieria)?\s+/, '');
+      if (k.includes('informat')) return 'informatica';
+      if (k.includes('civil')) return 'civil';
+      if (k.includes('electromec') || (k.includes('electro') && !k.includes('electron'))) return 'electro';
+      if (k.includes('industrial')) return 'industrial';
+      return null;
     }
     function buildXiFacCheckboxHtml(facList) {
       const facs = Array.isArray(facList) ? facList : [];
@@ -969,7 +1058,34 @@
         return '<label style="display:inline-flex;align-items:center;gap:6px;cursor:' + (dis ? 'not-allowed' : 'pointer') + ';opacity:' + (dis ? '0.55' : '1') + '"><input type="checkbox" class="nc-asis-xi-fac-cb" data-facultad-id="' + idAttr + '" ' + (dis ? 'disabled' : '') + ' />' + escapeHtml(d.label) + '</label>';
       }).join('');
     }
+    function buildCapsCarreraCheckboxHtml(carList) {
+      const cars = Array.isArray(carList) ? carList : [];
+      const defs = [
+        { key: 'informatica', label: 'Informática' },
+        { key: 'civil', label: 'Civil' },
+        { key: 'electro', label: 'Electro' },
+        { key: 'industrial', label: 'Industrial' },
+      ];
+      const idsByKey = { informatica: [], civil: [], electro: [], industrial: [] };
+      cars.forEach(c => {
+        const facKey = normXiKey(c.facultad_nombre || '');
+        // Solo facultad Ingeniería (no Comercial, Electrónica ni Alimentos de otras facultades).
+        if (facKey !== 'ingenieria') return;
+        const bucket = capsCareerBucket(c.nombre);
+        if (!bucket || !idsByKey[bucket]) return;
+        const id = Number(c.id);
+        if (id > 0 && idsByKey[bucket].indexOf(id) === -1) idsByKey[bucket].push(id);
+      });
+      return defs.map(d => {
+        const ids = idsByKey[d.key] || [];
+        const dis = !ids.length;
+        const idAttr = ids.join(',');
+        return '<label style="display:inline-flex;align-items:center;gap:6px;cursor:' + (dis ? 'not-allowed' : 'pointer') + ';opacity:' + (dis ? '0.55' : '1') + '"><input type="checkbox" class="nc-asis-caps-car-cb" data-carrera-ids="' + idAttr + '" data-carrera-key="' + d.key + '" ' + (dis ? 'disabled' : '') + ' />' + escapeHtml(d.label) + '</label>';
+      }).join('');
+    }
     const xiFacCbHtml = buildXiFacCheckboxHtml(facultades);
+    const capsCarCbHtml = buildCapsCarreraCheckboxHtml(carreras);
+    const mostrarNumInit = getMostrarNumPref();
     marcarState = { fecha: today, materia_id: '', grupo_id: '', aula_id: '', curso_id: '', facultad_id: '', carrera_id: '', docente_encargado_id: null, alumnos: [], items: {}, sortBy: 'apellido' };
     contentEl.innerHTML = `
       <div class="nc-card">
@@ -1021,11 +1137,26 @@
             <p style="margin:6px 0 0;font-size:12px;color:#666">Podés marcar una o varias facultades para acotar la lista de alumnos del grupo.</p>
           </div>
         </div>
+        <div class="nc-row nc-row-wrap" id="nc-asis-caps-car-wrap" style="display:none;gap:14px;margin-bottom:16px;align-items:flex-start">
+          <div class="nc-field" style="flex:1;min-width:280px">
+            <label style="display:block;margin-bottom:6px;font-weight:500">Filtrar por carrera (grupo CAPS)</label>
+            <div class="nc-row nc-row-wrap" style="gap:16px;align-items:center">
+              ${capsCarCbHtml}
+            </div>
+            <p style="margin:6px 0 0;font-size:12px;color:#666">Podés marcar una o varias carreras de Ingeniería. Ing. e Ingeniería se tratan como la misma carrera.</p>
+          </div>
+        </div>
         <div class="nc-row nc-row-wrap" style="gap:12px;margin-bottom:16px;align-items:flex-end">
-          <div class="nc-field" style="min-width:220px;display: flex;align-items: flex-start;">
-            <label style="display: flex;align-items: flex-start;gap:8px;user-select:none">
+          <div class="nc-field" style="min-width:160px;display: flex;align-items: flex-start;">
+            <label class="nc-asis-chk-label">
               <input type="checkbox" id="nc-asis-reemplazante-chk" />
               Reemplazante
+            </label>
+          </div>
+          <div class="nc-field" style="min-width:160px;display: flex;align-items: flex-start;">
+            <label class="nc-asis-chk-label" title="Permite elegir cualquier materia de Newton, no solo las asignadas al docente">
+              <input type="checkbox" id="nc-asis-otra-materia-chk" />
+              Otra materia
             </label>
           </div>
           <div class="nc-field" id="nc-asis-reemplazante-wrap" style="display:none;min-width:260px">
@@ -1077,10 +1208,14 @@
                 <option value="nombre">Nombre</option>
               </select>
             </div>
+            <label class="nc-asis-chk-label" title="Ocultar N° deja más espacio para marcar asistencia en el celular">
+              <input type="checkbox" id="nc-asis-mostrar-num" ${mostrarNumInit ? 'checked' : ''} />
+              Mostrar N°
+            </label>
             <span id="nc-asis-contador" style="font-weight:600;margin-left:auto"></span>
           </div>
           <div class="nc-asis-marcar-scroll">
-            <table class="nc-table" id="nc-asis-marcar-table">
+            <table class="nc-table${mostrarNumInit ? '' : ' nc-asis-hide-num'}" id="nc-asis-marcar-table">
               <thead><tr>
                 <th class="nc-asis-col-num">N°</th>
                 <th class="nc-asis-col-nombre">Nombre</th>
@@ -1105,6 +1240,8 @@
     const aulaSel = contentEl.querySelector('#nc-asis-aula');
     const grupoSel = contentEl.querySelector('#nc-asis-grupo');
     const materiaSel = contentEl.querySelector('#nc-asis-materia');
+    const otraMateriaChk = contentEl.querySelector('#nc-asis-otra-materia-chk');
+    const mostrarNumChk = contentEl.querySelector('#nc-asis-mostrar-num');
     const reemplazanteChk = contentEl.querySelector('#nc-asis-reemplazante-chk');
     const reemplazanteWrap = contentEl.querySelector('#nc-asis-reemplazante-wrap');
     const reemplazanteSel = contentEl.querySelector('#nc-asis-reemplazante');
@@ -1125,6 +1262,7 @@
     const listWrap = contentEl.querySelector('#nc-asis-marcar-list-wrap');
     const msg = contentEl.querySelector('#nc-asis-marcar-msg');
     const xiFacWrap = contentEl.querySelector('#nc-asis-xi-fac-wrap');
+    const capsCarWrap = contentEl.querySelector('#nc-asis-caps-car-wrap');
     const btnAgregarInvitado = contentEl.querySelector('#nc-asis-agregar-invitado');
     function getSelectedGrupo() {
       const id = grupoSel && grupoSel.value ? grupoSel.value : '';
@@ -1136,6 +1274,14 @@
       if (!label) return null;
       return { id, nombre: label, curso_id: null };
     }
+    function isCapsContext() {
+      const g = getSelectedGrupo();
+      if (!g) return false;
+      if (isCapsName(g.nombre)) return true;
+      const opt = grupoSel && grupoSel.selectedOptions && grupoSel.selectedOptions[0];
+      const label = opt ? String(opt.textContent || '').trim() : '';
+      return isCapsName(label);
+    }
     function syncXiFacultadesPanel() {
       const g = getSelectedGrupo();
       const show = !!(g && isXiGroupName(g.nombre));
@@ -1144,6 +1290,18 @@
       if (!show) {
         xiFacWrap.querySelectorAll('.nc-asis-xi-fac-cb').forEach(cb => { cb.checked = false; });
       }
+    }
+    function syncCapsCarrerasPanel() {
+      const show = isCapsContext();
+      if (!capsCarWrap) return;
+      capsCarWrap.style.display = show ? 'block' : 'none';
+      if (!show) {
+        capsCarWrap.querySelectorAll('.nc-asis-caps-car-cb').forEach(cb => { cb.checked = false; });
+      }
+    }
+    function syncGrupoFilterPanels() {
+      syncXiFacultadesPanel();
+      syncCapsCarrerasPanel();
     }
     function isCASS() {
       const a = getSelectedGrupo();
@@ -1345,6 +1503,16 @@
           });
           if (xiIds.length) url += '&facultad_ids=' + encodeURIComponent(xiIds.join(','));
         }
+        if (capsCarWrap && capsCarWrap.style.display !== 'none') {
+          const capsIds = [];
+          capsCarWrap.querySelectorAll('.nc-asis-caps-car-cb:checked').forEach(cb => {
+            String(cb.getAttribute('data-carrera-ids') || '').split(',').forEach(part => {
+              const cid = Number(String(part).trim());
+              if (cid > 0) capsIds.push(cid);
+            });
+          });
+          if (capsIds.length) url += '&carrera_ids=' + encodeURIComponent(capsIds.join(','));
+        }
         const res = await api(url);
         let list = (res && res.items) ? res.items : (Array.isArray(res) ? res : []);
         marcarState.alumnos = list;
@@ -1540,14 +1708,14 @@
       marcarState.items = {};
       if (listWrap) listWrap.style.display = 'none';
       if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione el Grupo para cargar la lista.'; }
-      syncXiFacultadesPanel();
+      syncGrupoFilterPanels();
     }
 
     async function cargarGruposPorMateria(materiaId) {
       if (!grupoSel) return;
       if (!materiaId) {
         grupoSel.innerHTML = '<option value="">Seleccione grupo</option>';
-        syncXiFacultadesPanel();
+        syncGrupoFilterPanels();
         return;
       }
       try {
@@ -1578,10 +1746,10 @@
         marcarState.items = {};
         if (listWrap) listWrap.style.display = 'none';
         if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione el Grupo para cargar la lista.'; }
-        syncXiFacultadesPanel();
+        syncGrupoFilterPanels();
       } catch (e) {
         grupoSel.innerHTML = '<option value="">Error al cargar grupos</option>';
-        syncXiFacultadesPanel();
+        syncGrupoFilterPanels();
       }
     }
 
@@ -1604,7 +1772,7 @@
         marcarState.items = {};
         if (listWrap) listWrap.style.display = 'none';
         if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione docente y materia para cargar las opciones.'; }
-        syncXiFacultadesPanel();
+        syncGrupoFilterPanels();
         return;
       }
 
@@ -1623,7 +1791,7 @@
       }
       // El dropdown de grupos debe mostrar solo los grupos con alumnos inscriptos a esta materia.
       await cargarGruposPorMateria(materiaId);
-      syncXiFacultadesPanel();
+      syncGrupoFilterPanels();
     }
 
     if (aulaSel) aulaSel.addEventListener('change', async () => {
@@ -1635,7 +1803,7 @@
       marcarState.grupo_id = grupoSel.value ? Number(grupoSel.value) : null;
       const selectedGrupo = getSelectedGrupo();
       marcarState.curso_id = (selectedGrupo && selectedGrupo.curso_id) ? Number(selectedGrupo.curso_id) : null;
-      syncXiFacultadesPanel();
+      syncGrupoFilterPanels();
       if (useSubgruposChk && useSubgruposChk.checked) await refreshSubgruposOpciones();
       await loadAlumnos();
     });
@@ -1671,6 +1839,12 @@
         if (t && t.classList && t.classList.contains('nc-asis-xi-fac-cb')) loadAlumnos();
       });
     }
+    if (capsCarWrap) {
+      capsCarWrap.addEventListener('change', (e) => {
+        const t = e.target;
+        if (t && t.classList && t.classList.contains('nc-asis-caps-car-cb')) loadAlumnos();
+      });
+    }
     if (reemplazanteChk && reemplazanteWrap) {
       reemplazanteChk.addEventListener('change', () => {
         const on = !!reemplazanteChk.checked;
@@ -1692,27 +1866,56 @@
         renderMarcarTable();
       }
     });
-    async function loadMateriasYCursosPorDocente(did) {
+    if (mostrarNumChk) {
+      mostrarNumChk.addEventListener('change', () => {
+        const show = !!mostrarNumChk.checked;
+        const table = contentEl.querySelector('#nc-asis-marcar-table');
+        if (table) table.classList.toggle('nc-asis-hide-num', !show);
+        try { localStorage.setItem(STORAGE_KEY_MOSTRAR_NUM, show ? '1' : '0'); } catch (_) { /* ignore */ }
+      });
+    }
+    let allMateriasCache = null;
+    function isOtraMateria() {
+      return !!(otraMateriaChk && otraMateriaChk.checked);
+    }
+    async function fetchAllMaterias() {
+      if (allMateriasCache) return allMateriasCache;
+      const matRes = await api('/materias?activo=1');
+      allMateriasCache = (matRes && matRes.items) ? matRes.items : [];
+      return allMateriasCache;
+    }
+    function fillMateriaSelect(matItems, keepValue) {
+      if (!materiaSel) return;
+      const items = Array.isArray(matItems) ? matItems : [];
+      materiaSel.innerHTML = '<option value="">Seleccione materia</option>' + items.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nombre) + '</option>').join('');
+      if (keepValue && items.some(m => String(m.id) === String(keepValue))) {
+        materiaSel.value = String(keepValue);
+      }
+    }
+    async function loadMateriasYCursosPorDocente(did, opts) {
+      const keepValue = opts && opts.keepValue != null
+        ? String(opts.keepValue)
+        : (materiaSel && materiaSel.value ? String(materiaSel.value) : '');
+      if (isOtraMateria()) {
+        try {
+          fillMateriaSelect(await fetchAllMaterias(), keepValue);
+        } catch (_) {
+          if (materiaSel) materiaSel.innerHTML = '<option value="">Error al cargar</option>';
+        }
+        return;
+      }
       if (!did) {
         if (materiaSel) materiaSel.innerHTML = '<option value="">Seleccione docente primero</option>';
         return;
       }
       try {
         const matRes = await api('/docentes/' + encodeURIComponent(did) + '/materias');
-        const matItems = (matRes && matRes.items) ? matRes.items : [];
-        if (materiaSel) materiaSel.innerHTML = '<option value="">Seleccione materia</option>' + matItems.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nombre) + '</option>').join('');
+        fillMateriaSelect((matRes && matRes.items) ? matRes.items : [], keepValue);
       } catch (_) {
         if (materiaSel) materiaSel.innerHTML = '<option value="">Error al cargar</option>';
       }
     }
-    if (docenteSel) docenteSel.addEventListener('change', async () => {
-      const did = docenteSel.value;
-      const replId = (reemplazanteChk && reemplazanteChk.checked && reemplazanteSel && reemplazanteSel.value)
-        ? Number(reemplazanteSel.value)
-        : null;
-      marcarState.docente_encargado_id = replId || (did ? Number(did) : null);
-      await loadMateriasYCursosPorDocente(did);
-      // Opciones de Aula/Grupo dependen de Docente+Materia.
+    function resetGrupoYLista(message) {
       allowedCursoIds = [];
       marcarState.materia_id = null;
       marcarState.grupo_id = null;
@@ -1723,7 +1926,37 @@
       marcarState.alumnos = [];
       marcarState.items = {};
       if (listWrap) listWrap.style.display = 'none';
-      if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione Materia para cargar las opciones.'; }
+      if (msg) { msg.style.display = 'block'; msg.textContent = message || 'Seleccione Materia para cargar las opciones.'; }
+      syncGrupoFilterPanels();
+    }
+    if (otraMateriaChk) {
+      otraMateriaChk.addEventListener('change', async () => {
+        const did = docenteSel && docenteSel.value ? docenteSel.value : '';
+        const prev = materiaSel && materiaSel.value ? materiaSel.value : '';
+        await loadMateriasYCursosPorDocente(did, { keepValue: prev });
+        const stillSelected = materiaSel && materiaSel.value && String(materiaSel.value) === String(prev);
+        if (!stillSelected) {
+          resetGrupoYLista(isOtraMateria() ? 'Seleccione materia para cargar las opciones.' : 'Seleccione Materia para cargar las opciones.');
+        } else {
+          marcarState.materia_id = Number(materiaSel.value);
+        }
+        scheduleMarcarDraftSave();
+      });
+    }
+    if (docenteSel) docenteSel.addEventListener('change', async () => {
+      const did = docenteSel.value;
+      const replId = (reemplazanteChk && reemplazanteChk.checked && reemplazanteSel && reemplazanteSel.value)
+        ? Number(reemplazanteSel.value)
+        : null;
+      marcarState.docente_encargado_id = replId || (did ? Number(did) : null);
+      const keepMateria = isOtraMateria() && materiaSel && materiaSel.value ? materiaSel.value : '';
+      await loadMateriasYCursosPorDocente(did, { keepValue: keepMateria });
+      if (keepMateria && materiaSel && String(materiaSel.value) === String(keepMateria)) {
+        marcarState.materia_id = Number(keepMateria);
+        scheduleMarcarDraftSave();
+        return;
+      }
+      resetGrupoYLista('Seleccione Materia para cargar las opciones.');
     });
     const currentUserId = (window.NC_APP && window.NC_APP.currentUserId != null) ? Number(window.NC_APP.currentUserId) : null;
     const docentes = (window.ncAsisDocentesCache && Array.isArray(window.ncAsisDocentesCache)) ? window.ncAsisDocentesCache : [];
@@ -1766,7 +1999,6 @@
       };
       body.observacion_general = isReemplazo ? motivoReemplazo : null;
       if (marcarState.grupo_id) body.grupo_id = Number(marcarState.grupo_id);
-      if (marcarState.curso_id) body.curso_id = Number(marcarState.curso_id);
       if (marcarState.subgrupo) body.subgrupo = marcarState.subgrupo;
       try {
         await api('/asistencia/sesiones', {
@@ -1798,10 +2030,13 @@
           marcarState.fecha = draft.fecha;
         }
         const titularRestore = draft.docente_titular_id || draft.docente_encargado_id;
+        if (otraMateriaChk) otraMateriaChk.checked = !!draft.otra_materia;
         if (docenteSel && titularRestore) {
           docenteSel.value = String(titularRestore);
           marcarState.docente_encargado_id = Number(titularRestore);
-          await loadMateriasYCursosPorDocente(String(titularRestore));
+          await loadMateriasYCursosPorDocente(String(titularRestore), { keepValue: draft.materia_id || '' });
+        } else if (draft.otra_materia) {
+          await loadMateriasYCursosPorDocente('', { keepValue: draft.materia_id || '' });
         }
         if (materiaSel && draft.materia_id) {
           materiaSel.value = String(draft.materia_id);
@@ -1815,12 +2050,19 @@
           const selectedGrupo = getSelectedGrupo();
           marcarState.curso_id = (selectedGrupo && selectedGrupo.curso_id) ? Number(selectedGrupo.curso_id) : null;
         }
-        syncXiFacultadesPanel();
+        syncGrupoFilterPanels();
         if (draft.xiFacultadIds && draft.xiFacultadIds.length && xiFacWrap) {
           const idSet = new Set(draft.xiFacultadIds.map(Number));
           xiFacWrap.querySelectorAll('.nc-asis-xi-fac-cb').forEach(cb => {
             const fid = Number(cb.getAttribute('data-facultad-id') || 0);
             cb.checked = idSet.has(fid);
+          });
+        }
+        if (draft.capsCarreraIds && draft.capsCarreraIds.length && capsCarWrap) {
+          const idSet = new Set(draft.capsCarreraIds.map(Number));
+          capsCarWrap.querySelectorAll('.nc-asis-caps-car-cb').forEach(cb => {
+            const ids = String(cb.getAttribute('data-carrera-ids') || '').split(',').map(Number);
+            cb.checked = ids.some(id => id > 0 && idSet.has(id));
           });
         }
         if (draft.reemplazante && reemplazanteChk) {
@@ -2303,6 +2545,414 @@
     }
 
     loadReportes();
+  }
+
+  // ---------- Reporte de periodo (gráficos + grilla) ----------
+  async function renderReportePeriodo() {
+    if (!isActiveSub('reporte-periodo')) return;
+    contentEl.innerHTML = '<div class="nc-card"><p>Cargando...</p></div>';
+    let cursos = [], aulas = [], materias = [];
+    try {
+      const [cursosRes, aulasRes, matRes] = await Promise.all([
+        api('/cursos'),
+        api('/aulas'),
+        api('/materias?activo=1'),
+      ]);
+      cursos = Array.isArray(cursosRes) ? cursosRes : (cursosRes && cursosRes.items ? cursosRes.items : []);
+      aulas = Array.isArray(aulasRes) ? aulasRes : (aulasRes && aulasRes.items ? aulasRes.items : []);
+      materias = (matRes && matRes.items) ? matRes.items : [];
+    } catch (_) {}
+    if (!isActiveSub('reporte-periodo')) return;
+
+    const aulasGrupoAll = filterAulasGrupoDropdown(aulas);
+    const range = (function () {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: localDateYMD(from), to: localDateYMD(now) };
+    })();
+
+    contentEl.innerHTML = `
+      <div class="nc-card nc-rep-periodo-print">
+        <h3 style="margin:0 0 8px">Reporte de asistencia por periodo</h3>
+        <p style="margin:0 0 14px;font-size:13px;color:#666">El curso y el rango de fechas son obligatorios. Grupo y materia son opcionales.</p>
+        <div class="nc-row nc-row-wrap nc-rep-periodo-toolbar" style="gap:12px;margin-bottom:16px;align-items:flex-end">
+          <div class="nc-field" style="min-width:180px;flex:1">
+            <label>Curso *</label>
+            <select id="nc-asis-rp-curso">
+              <option value="">Seleccione curso</option>
+              ${cursos.map(c => '<option value="' + c.id + '">' + escapeHtml(c.nombre) + '</option>').join('')}
+            </select>
+          </div>
+          <div class="nc-field" style="min-width:160px;flex:1">
+            <label>Grupo</label>
+            <select id="nc-asis-rp-grupo"><option value="">Todos</option></select>
+          </div>
+          <div class="nc-field" style="min-width:160px;flex:1">
+            <label>Materia</label>
+            <select id="nc-asis-rp-materia"><option value="">Todas</option>${materias.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nombre) + '</option>').join('')}</select>
+          </div>
+          <div class="nc-field" style="min-width:140px">
+            <label>Desde *</label>
+            <input type="date" id="nc-asis-rp-from" value="${range.from}" />
+          </div>
+          <div class="nc-field" style="min-width:140px">
+            <label>Hasta *</label>
+            <input type="date" id="nc-asis-rp-to" value="${range.to}" />
+          </div>
+          <button type="button" class="nc-btn" id="nc-asis-rp-generar" style="background:#2e7d32;color:#fff">Generar reporte</button>
+          <button type="button" class="nc-btn" id="nc-asis-rp-print">Imprimir / PDF</button>
+          <button type="button" class="nc-btn" id="nc-asis-rp-csv">Exportar CSV</button>
+        </div>
+        <div id="nc-asis-rp-result"><p style="opacity:.75">Seleccione un curso y pulse «Generar reporte».</p></div>
+      </div>
+    `;
+
+    const selCurso = contentEl.querySelector('#nc-asis-rp-curso');
+    const selGrupo = contentEl.querySelector('#nc-asis-rp-grupo');
+    const selMateria = contentEl.querySelector('#nc-asis-rp-materia');
+    const inpFrom = contentEl.querySelector('#nc-asis-rp-from');
+    const inpTo = contentEl.querySelector('#nc-asis-rp-to');
+    const resultEl = contentEl.querySelector('#nc-asis-rp-result');
+    let lastReporte = null;
+
+    function fillGrupoOptions(cursoId) {
+      const cid = Number(cursoId) || 0;
+      const curso = cursos.find(c => Number(c.id) === cid);
+      let list = [];
+      if (cid) {
+        if (isCnaCursoNombre(curso && curso.nombre)) {
+          list = aulasGrupoAll.filter(a => isCnaGrupoNombre(a.nombre));
+        } else {
+          list = aulasGrupoAll.filter(a => Number(a.curso_id) === cid);
+          if (!list.length) list = aulasGrupoAll;
+        }
+      }
+      const current = selGrupo ? selGrupo.value : '';
+      if (!selGrupo) return;
+      selGrupo.innerHTML = '<option value="">Todos</option>' + list.map(a =>
+        '<option value="' + a.id + '">' + escapeHtml(aulaGrupoOptionLabel(a)) + '</option>'
+      ).join('');
+      if (current && list.some(a => String(a.id) === String(current))) selGrupo.value = current;
+    }
+
+    async function fillMateriaOptions(cursoId) {
+      const cid = Number(cursoId) || 0;
+      let list = materias;
+      if (cid) {
+        try {
+          const res = await api('/asistencia/cursos/' + cid + '/materias');
+          const items = (res && res.items) ? res.items : [];
+          if (items.length) {
+            list = items.map(m => ({ id: m.materia_id || m.id, nombre: m.materia_nombre || m.nombre }));
+          }
+        } catch (_) {}
+      }
+      const current = selMateria ? selMateria.value : '';
+      if (!selMateria) return;
+      selMateria.innerHTML = '<option value="">Todas</option>' + list.map(m =>
+        '<option value="' + m.id + '">' + escapeHtml(m.nombre) + '</option>'
+      ).join('');
+      if (current && list.some(m => String(m.id) === String(current))) selMateria.value = current;
+    }
+
+    fillGrupoOptions('');
+
+    if (selCurso) {
+      selCurso.addEventListener('change', async () => {
+        fillGrupoOptions(selCurso.value);
+        await fillMateriaOptions(selCurso.value);
+      });
+    }
+
+    function formatDateDM(ymd) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
+      if (!m) return ymd || '';
+      return m[3] + '/' + m[2];
+    }
+    function formatDateDMY(ymd) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
+      if (!m) return ymd || '';
+      return m[3] + '/' + m[2] + '/' + m[1];
+    }
+
+    function buildPieSvg(presentes, ausentes, size) {
+      size = size || 112;
+      const cx = 21;
+      const cy = 21;
+      const r = 18;
+      const total = Number(presentes) + Number(ausentes);
+      const wrapOpen = '<svg viewBox="0 0 42 42" width="' + size + '" height="' + size + '" aria-hidden="true">';
+      const wrapClose = '</svg>';
+      if (total <= 0) {
+        return wrapOpen + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#e0e0e0"></circle>' + wrapClose;
+      }
+      if (Number(ausentes) <= 0) {
+        return wrapOpen + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#2e7d32"></circle>' + wrapClose;
+      }
+      if (Number(presentes) <= 0) {
+        return wrapOpen + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#c62828"></circle>' + wrapClose;
+      }
+      const pct = Number(presentes) / total;
+      const start = -Math.PI / 2;
+      const end = start + (pct * 2 * Math.PI);
+      const x1 = cx + r * Math.cos(start);
+      const y1 = cy + r * Math.sin(start);
+      const x2 = cx + r * Math.cos(end);
+      const y2 = cy + r * Math.sin(end);
+      const large = pct > 0.5 ? 1 : 0;
+      const d = 'M ' + cx + ' ' + cy + ' L ' + x1.toFixed(3) + ' ' + y1.toFixed(3)
+        + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(3) + ' ' + y2.toFixed(3) + ' Z';
+      return wrapOpen
+        + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#c62828"></circle>'
+        + '<path d="' + d + '" fill="#2e7d32"></path>'
+        + wrapClose;
+    }
+
+    function alumnoNombre(al) {
+      const ap = String((al && al.apellidos) || '').trim();
+      const no = String((al && al.nombres) || '').trim();
+      return (ap + (ap && no ? ', ' : '') + no).trim() || 'Sin nombre';
+    }
+
+    function diaStatus(val) {
+      if (val === 1 || val === '1' || val === true) return 'si';
+      if (val === 0 || val === '0' || val === false) return 'no';
+      return 'na';
+    }
+
+    function diaMarkMeta(st) {
+      if (st === 'si') return { fill: '#2e7d32', stroke: '#1b5e20', label: 'S', title: 'Asistió' };
+      if (st === 'no') return { fill: '#c62828', stroke: '#8e0000', label: 'N', title: 'Ausente' };
+      return { fill: '#eeeeee', stroke: '#bdbdbd', label: '–', title: 'Sin registro' };
+    }
+
+    function diaBoxHtml(st, fechaLabel) {
+      const m = diaMarkMeta(st);
+      const title = m.title + ' — ' + fechaLabel;
+      return '<td class="nc-rep-dia-cell" title="' + escapeHtml(title) + '" style="background:' + m.fill + ';-webkit-print-color-adjust:exact;print-color-adjust:exact">'
+        + '<svg class="nc-rep-dia-box" width="16" height="16" viewBox="0 0 16 16" aria-label="' + escapeHtml(m.title) + '">'
+        + '<rect x="0.5" y="0.5" width="15" height="15" rx="3" fill="' + m.fill + '" stroke="' + m.stroke + '"/>'
+        + '<text x="8" y="12" text-anchor="middle" font-size="9" font-weight="700" fill="' + (st === 'na' ? '#666' : '#fff') + '">' + m.label + '</text>'
+        + '</svg></td>';
+    }
+
+    function legendSwatchHtml(fill, stroke) {
+      return '<svg class="nc-rep-periodo-swatch" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">'
+        + '<rect x="0.5" y="0.5" width="11" height="11" rx="2" fill="' + fill + '" stroke="' + (stroke || fill) + '"/>'
+        + '</svg>';
+    }
+
+    function renderReporteHtml(data) {
+      const cursoNom = (data.curso && data.curso.nombre) ? data.curso.nombre : '—';
+      const grupoNom = (data.grupo && data.grupo.nombre) ? data.grupo.nombre : 'Todos';
+      const materiaNom = (data.materia && data.materia.nombre) ? data.materia.nombre : 'Todas';
+      const totalClases = Number(data.total_clases) || 0;
+      const dias = Array.isArray(data.dias) ? data.dias : [];
+      const alumnos = Array.isArray(data.alumnos) ? data.alumnos : [];
+      const showGrupoCol = !data.grupo;
+
+      const pies = dias.map((d, i) => {
+        const presentes = Number(d.presentes) || 0;
+        const ausentes = Number(d.ausentes) || 0;
+        const total = Number(d.total) || (presentes + ausentes);
+        return `
+          <div class="nc-rep-periodo-pie">
+            ${buildPieSvg(presentes, ausentes)}
+            <div class="pie-ratio">${presentes}/${total}</div>
+            <div class="pie-day">${escapeHtml(formatDateDM(d.fecha))}</div>
+            <div class="pie-sub">día ${i + 1} de ${totalClases} clases</div>
+          </div>
+        `;
+      }).join('');
+
+      const headDays = dias.map(d => '<th class="nc-rep-dia-th" title="' + escapeHtml(d.fecha) + '">' + escapeHtml(formatDateDM(d.fecha)) + '</th>').join('');
+      const rows = alumnos.map((al, idx) => {
+        const boxes = dias.map(d => {
+          const st = diaStatus(al.dias ? al.dias[d.fecha] : null);
+          return diaBoxHtml(st, formatDateDM(d.fecha));
+        }).join('');
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td class="nc-rep-alum-name">${escapeHtml(alumnoNombre(al))}</td>
+            ${showGrupoCol ? '<td>' + escapeHtml(al.grupo_nombre || '') + '</td>' : ''}
+            <td><strong>${Number(al.asistidas) || 0}/${Number(al.total_clases) || 0}</strong></td>
+            ${boxes}
+          </tr>
+        `;
+      }).join('');
+
+      if (!dias.length) {
+        return `
+          <div class="nc-rep-periodo-meta">
+            <div class="nc-rep-periodo-meta-item"><div class="lbl">Curso — Grupo</div><div class="val">${escapeHtml(cursoNom)} — ${escapeHtml(grupoNom)}</div></div>
+            <div class="nc-rep-periodo-meta-item"><div class="lbl">Materia</div><div class="val">${escapeHtml(materiaNom)}</div></div>
+            <div class="nc-rep-periodo-meta-item"><div class="lbl">Periodo</div><div class="val">${escapeHtml(formatDateDMY(data.fecha_desde))} a ${escapeHtml(formatDateDMY(data.fecha_hasta))}</div></div>
+            <div class="nc-rep-periodo-meta-item"><div class="lbl">Total de clases</div><div class="val">0</div></div>
+          </div>
+          <p style="opacity:.8">No hay clases registradas en el periodo seleccionado con esos filtros.</p>
+        `;
+      }
+
+      return `
+        <div class="nc-rep-periodo-meta">
+          <div class="nc-rep-periodo-meta-item"><div class="lbl">Curso — Grupo</div><div class="val">${escapeHtml(cursoNom)} — ${escapeHtml(grupoNom)}</div></div>
+          <div class="nc-rep-periodo-meta-item"><div class="lbl">Materia</div><div class="val">${escapeHtml(materiaNom)}</div></div>
+          <div class="nc-rep-periodo-meta-item"><div class="lbl">Periodo</div><div class="val">${escapeHtml(formatDateDMY(data.fecha_desde))} a ${escapeHtml(formatDateDMY(data.fecha_hasta))}</div></div>
+          <div class="nc-rep-periodo-meta-item"><div class="lbl">Total de clases</div><div class="val">${totalClases}</div></div>
+          <div class="nc-rep-periodo-meta-item"><div class="lbl">Alumnos</div><div class="val">${alumnos.length}</div></div>
+        </div>
+        <div class="nc-rep-periodo-legend">
+          <span>${legendSwatchHtml('#2e7d32', '#1b5e20')} Asistieron (S)</span>
+          <span>${legendSwatchHtml('#c62828', '#8e0000')} No asistieron (N)</span>
+          ${!data.grupo ? '<span>' + legendSwatchHtml('#eeeeee', '#bdbdbd') + ' Sin registro</span>' : ''}
+        </div>
+        <div class="nc-rep-periodo-pies">${pies}</div>
+        <h4 style="margin:0 0 10px;font-size:15px">Lista de estudiantes</h4>
+        <div class="nc-asis-table-scroll">
+          <table class="nc-table" id="nc-asis-rep-periodo-table" style="width:100%">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Alumno</th>
+                ${showGrupoCol ? '<th>Grupo</th>' : ''}
+                <th>N° de clases</th>
+                ${headDays}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="' + (3 + (showGrupoCol ? 1 : 0) + dias.length) + '">No hay alumnos para mostrar.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function generarReporte() {
+      if (!isActiveSub('reporte-periodo')) return;
+      const curso_id = selCurso ? selCurso.value : '';
+      const grupo_id = selGrupo ? selGrupo.value : '';
+      const materia_id = selMateria ? selMateria.value : '';
+      const fecha_desde = inpFrom ? inpFrom.value : '';
+      const fecha_hasta = inpTo ? inpTo.value : '';
+      if (!curso_id) {
+        alert('Seleccione un curso para generar el reporte.');
+        return;
+      }
+      if (!fecha_desde || !fecha_hasta) {
+        alert('Indique el periodo (desde y hasta).');
+        return;
+      }
+      if (fecha_desde > fecha_hasta) {
+        alert('La fecha «Desde» no puede ser posterior a «Hasta».');
+        return;
+      }
+      if (resultEl) resultEl.innerHTML = '<p style="opacity:.7">Generando reporte...</p>';
+      lastReporte = null;
+      let q = 'curso_id=' + encodeURIComponent(curso_id)
+        + '&fecha_desde=' + encodeURIComponent(fecha_desde)
+        + '&fecha_hasta=' + encodeURIComponent(fecha_hasta);
+      if (grupo_id) q += '&grupo_id=' + encodeURIComponent(grupo_id) + '&aula_id=' + encodeURIComponent(grupo_id);
+      if (materia_id) q += '&materia_id=' + encodeURIComponent(materia_id);
+      try {
+        const data = await api('/asistencia/reporte-periodo?' + q);
+        if (!isActiveSub('reporte-periodo') || !listPanelReady('#nc-asis-rp-curso')) return;
+        lastReporte = data;
+        if (resultEl) resultEl.innerHTML = renderReporteHtml(data);
+      } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<p style="color:#b00">Error: ' + escapeHtml(e && e.message ? e.message : 'No se pudo generar el reporte.') + '</p>';
+      }
+    }
+
+    function printReporte() {
+      if (!lastReporte) {
+        alert('Primero genere un reporte para poder imprimir.');
+        return;
+      }
+      const htmlResumen = resultEl ? resultEl.innerHTML : '';
+      const win = window.open('', '_blank');
+      if (!win) {
+        alert('El navegador bloqueó la ventana de impresión. Permita ventanas emergentes para exportar en PDF.');
+        return;
+      }
+      win.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Reporte de asistencia por periodo</title>
+          <style>
+            body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin:20px; color:#222; }
+            h1 { font-size:20px; margin-bottom:12px; }
+            .nc-rep-periodo-meta { display:flex; flex-wrap:wrap; gap:12px 28px; margin-bottom:18px; padding:12px 14px; background:#f5f7ff; border:1px solid #e0e7ff; border-radius:8px; }
+            .nc-rep-periodo-meta-item .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#6b6f80; }
+            .nc-rep-periodo-meta-item .val { font-size:14px; font-weight:600; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .nc-rep-periodo-legend { display:flex; gap:16px; font-size:13px; margin-bottom:12px; }
+            .nc-rep-periodo-swatch { width:12px; height:12px; display:inline-block; margin-right:6px; vertical-align:middle; }
+            .nc-rep-periodo-pies { display:flex; flex-wrap:wrap; gap:16px 20px; margin-bottom:20px; }
+            .nc-rep-periodo-pie { text-align:center; width:130px; }
+            .nc-rep-periodo-pie svg { display:block; margin:0 auto 8px; }
+            .pie-ratio { font-size:13px; font-weight:600; }
+            .pie-day { font-size:12px; color:#555; }
+            .pie-sub { font-size:11px; color:#888; }
+            table { border-collapse: collapse; width: 100%; font-size:11px; }
+            th, td { border: 1px solid #ddd; padding: 5px 6px; text-align:left; }
+            th { background:#f0f4ff; }
+            .nc-rep-dia-th { writing-mode: vertical-rl; transform: rotate(180deg); height:64px; min-width:24px; font-size:10px; }
+            .nc-rep-dia-cell { text-align:center; padding:4px 3px !important; }
+            .nc-rep-dia-box { width:14px; height:14px; display:inline-block; vertical-align:middle; }
+          </style>
+        </head>
+        <body>
+          <h1>Reporte de asistencia por periodo</h1>
+          ${htmlResumen}
+        </body>
+        </html>
+      `);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { win.print(); }, 300);
+    }
+
+    function exportCsvReporte() {
+      if (!lastReporte || !Array.isArray(lastReporte.alumnos) || !lastReporte.alumnos.length) {
+        alert('Primero genere un reporte para poder exportar.');
+        return;
+      }
+      const dias = Array.isArray(lastReporte.dias) ? lastReporte.dias : [];
+      const showGrupoCol = !lastReporte.grupo;
+      const header = ['#', 'Alumno'];
+      if (showGrupoCol) header.push('Grupo');
+      header.push('Asistidas', 'Total clases');
+      dias.forEach(d => header.push(formatDateDM(d.fecha)));
+      const rows = lastReporte.alumnos.map((al, idx) => {
+        const row = [String(idx + 1), alumnoNombre(al)];
+        if (showGrupoCol) row.push(al.grupo_nombre || '');
+        row.push(String(al.asistidas || 0), String(al.total_clases || 0));
+        dias.forEach(d => {
+          const st = diaStatus(al.dias ? al.dias[d.fecha] : null);
+          row.push(st === 'si' ? 'Sí' : (st === 'no' ? 'No' : '-'));
+        });
+        return row;
+      });
+      const csvLines = [header.join(','), ...rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))];
+      const blob = new Blob(['\ufeff' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const fromVal = lastReporte.fecha_desde || '';
+      const toVal = lastReporte.fecha_hasta || '';
+      a.download = 'reporte-asistencia-periodo-' + (fromVal || 'desde') + '-' + (toVal || 'hasta') + '.csv';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }
+
+    const btnGen = contentEl.querySelector('#nc-asis-rp-generar');
+    const btnPrint = contentEl.querySelector('#nc-asis-rp-print');
+    const btnCsv = contentEl.querySelector('#nc-asis-rp-csv');
+    if (btnGen) btnGen.onclick = withButtonLock(btnGen, generarReporte, { loadingText: 'Generando...' });
+    if (btnPrint) btnPrint.onclick = printReporte;
+    if (btnCsv) btnCsv.onclick = exportCsvReporte;
   }
 
   // ---------- Mis asistencias registradas ----------
@@ -3121,11 +3771,19 @@
       const curso_id = contentEl.querySelector('#nc-asis-list-curso').value;
       const materia_id = contentEl.querySelector('#nc-asis-list-materia').value;
       const search = (contentEl.querySelector('#nc-asis-list-search') || {}).value || '';
+      const fechaDesde = (contentEl.querySelector('#nc-asis-list-fecha-desde') || {}).value || '';
+      const fechaHasta = (contentEl.querySelector('#nc-asis-list-fecha-hasta') || {}).value || '';
+      if (fechaDesde && fechaHasta && fechaDesde > fechaHasta) {
+        alert('El rango de fechas es inválido: "Desde" no puede ser mayor que "Hasta".');
+        return;
+      }
       let q = '';
       if (aula_id) q += '?aula_id=' + encodeURIComponent(aula_id);
       if (curso_id) q += (q ? '&' : '?') + 'curso_id=' + encodeURIComponent(curso_id);
       if (materia_id) q += (q ? '&' : '?') + 'materia_id=' + encodeURIComponent(materia_id);
       if (search) q += (q ? '&' : '?') + 'search=' + encodeURIComponent(search);
+      if (fechaDesde) q += (q ? '&' : '?') + 'fecha_desde=' + encodeURIComponent(fechaDesde);
+      if (fechaHasta) q += (q ? '&' : '?') + 'fecha_hasta=' + encodeURIComponent(fechaHasta);
       try {
         const res = await api('/asistencia/lista-alumnos' + q);
         allItems = (res && res.items) ? res.items : [];
@@ -3302,6 +3960,10 @@
     contentEl.querySelector('#nc-asis-list-aula').onchange = loadLista;
     contentEl.querySelector('#nc-asis-list-curso').onchange = loadLista;
     contentEl.querySelector('#nc-asis-list-materia').onchange = loadLista;
+    const fechaDesdeEl = contentEl.querySelector('#nc-asis-list-fecha-desde');
+    const fechaHastaEl = contentEl.querySelector('#nc-asis-list-fecha-hasta');
+    if (fechaDesdeEl) fechaDesdeEl.onchange = loadLista;
+    if (fechaHastaEl) fechaHastaEl.onchange = loadLista;
     contentEl.querySelector('#nc-asis-list-search').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') loadLista();
     });
@@ -3349,11 +4011,13 @@
     document.body.appendChild(modal);
     const body = modal.querySelector('.nc-modal-body');
 
-    function renderBody(a, historial, listIndex) {
+    function renderBody(a, historial, listIndex, fechaDesde, fechaHasta) {
       const idx = listIndex ?? currentIndex;
       const resumen = historial.resumen || {};
       const pct = resumen.porcentaje ?? 0;
       const color = pct < 30 ? '#c62828' : pct < 70 ? '#f9a825' : '#2e7d32';
+      const fromVal = escapeHtml(fechaDesde || '');
+      const toVal = escapeHtml(fechaHasta || '');
       const navHtml = hasNav ? `
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:12px 0;border-bottom:1px solid #eee">
           <button type="button" id="nc-asis-nav-prev" style="background:#fff;color:#333;border:1px solid #ccc;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px" ${idx <= 0 ? 'disabled' : ''}>Anterior</button>
@@ -3374,16 +4038,16 @@
           </div>
         </div>
         <h4 style="margin:0 0 8px;font-size:15px;font-weight:600;color:#333">Estadísticas de asistencia</h4>
-        <p style="margin:0 0 20px;font-size:15px"><span style="color:${color};font-weight:700">${resumen.promedio_texto || '0/0'}</span> (${pct}%)</p>
+        <p id="nc-asis-hist-stats" style="margin:0 0 20px;font-size:15px"><span style="color:${color};font-weight:700">${resumen.promedio_texto || '0/0'}</span> (${pct}%)</p>
         <h4 style="margin:0 0 8px;font-size:15px;font-weight:600;color:#333">Historial de asistencia <span style="font-weight:400;color:#777;font-size:13px">(más reciente arriba)</span></h4>
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:16px">
           <div>
             <label style="display:block;margin-bottom:4px;font-size:12px;color:#666">Desde</label>
-            <input type="date" id="nc-asis-hist-from" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px" />
+            <input type="date" id="nc-asis-hist-from" value="${fromVal}" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px" />
           </div>
           <div>
             <label style="display:block;margin-bottom:4px;font-size:12px;color:#666">Hasta</label>
-            <input type="date" id="nc-asis-hist-to" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px" />
+            <input type="date" id="nc-asis-hist-to" value="${toVal}" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px" />
           </div>
           <button type="button" id="nc-asis-hist-refresh" style="background:#333;color:#fff;padding:8px 16px;border:none;border-radius:6px;cursor:pointer;font-size:14px">Buscar</button>
           <button type="button" id="nc-asis-hist-limpiar" style="background:#fff;color:#333;padding:8px 16px;border:1px solid #333;border-radius:6px;cursor:pointer;font-size:14px">Limpiar</button>
@@ -3395,18 +4059,41 @@
 
     const state = { alumnoId, listIndex: currentIndex };
     let historialItems = [];
-    Promise.all([api('/alumnos/' + alumnoId), api('/asistencia/alumno/' + alumnoId + '/historial')]).then(([alumno, historial]) => {
-      body.innerHTML = renderBody(alumno, historial, state.listIndex);
+    function currentHistDates() {
+      return {
+        from: body.querySelector('#nc-asis-hist-from')?.value || '',
+        to: body.querySelector('#nc-asis-hist-to')?.value || '',
+      };
+    }
+    function historialPath(id, from, to) {
+      let q = '';
+      if (from) q += (q ? '&' : '') + 'fecha_desde=' + encodeURIComponent(from);
+      if (to) q += (q ? '&' : '') + 'fecha_hasta=' + encodeURIComponent(to);
+      return '/asistencia/alumno/' + id + '/historial' + (q ? '?' + q : '');
+    }
+    function paintStats(resumen) {
+      const elStats = body.querySelector('#nc-asis-hist-stats');
+      if (!elStats) return;
+      const pct = Number((resumen && resumen.porcentaje) ?? 0);
+      const color = pct < 30 ? '#c62828' : pct < 70 ? '#f9a825' : '#2e7d32';
+      const texto = (resumen && resumen.promedio_texto) ? String(resumen.promedio_texto) : '0/0';
+      elStats.innerHTML = '<span style="color:' + color + ';font-weight:700">' + escapeHtml(texto) + '</span> (' + pct + '%)';
+    }
+    const initialFrom = (contentEl && contentEl.querySelector('#nc-asis-list-fecha-desde') || {}).value || '';
+    const initialTo = (contentEl && contentEl.querySelector('#nc-asis-list-fecha-hasta') || {}).value || '';
+    Promise.all([api('/alumnos/' + alumnoId), api(historialPath(alumnoId, initialFrom, initialTo))]).then(([alumno, historial]) => {
+      body.innerHTML = renderBody(alumno, historial, state.listIndex, initialFrom, initialTo);
     function bindHandlers() {
       const histTbody = body.querySelector('#nc-asis-historial-tbody');
       if (!histTbody) return;
       function renderHistorial() {
-        const from = body.querySelector('#nc-asis-hist-from')?.value || '';
-        const to = body.querySelector('#nc-asis-hist-to')?.value || '';
-        let q = '';
-        if (from) q += '&fecha_desde=' + encodeURIComponent(from);
-        if (to) q += '&fecha_hasta=' + encodeURIComponent(to);
-        api('/asistencia/alumno/' + state.alumnoId + '/historial?' + q.replace(/^&/, '')).then(h => {
+        const { from, to } = currentHistDates();
+        if (from && to && from > to) {
+          alert('El rango de fechas es inválido: "Desde" no puede ser mayor que "Hasta".');
+          return;
+        }
+        api(historialPath(state.alumnoId, from, to)).then(h => {
+          paintStats(h.resumen || {});
           historialItems = (h.items || []).map(it => ({
             ...it,
             item_id: Number(it.item_id) || 0,
@@ -3520,19 +4207,21 @@
       if (hasNav && (navPrev || navNext)) {
         if (navPrev) navPrev.onclick = () => {
           if (state.listIndex <= 0) return;
+          const { from, to } = currentHistDates();
           state.listIndex--;
           state.alumnoId = list[state.listIndex].id;
-          Promise.all([api('/alumnos/' + state.alumnoId), api('/asistencia/alumno/' + state.alumnoId + '/historial')]).then(([al, hist]) => {
-            body.innerHTML = renderBody(al, hist, state.listIndex);
+          Promise.all([api('/alumnos/' + state.alumnoId), api(historialPath(state.alumnoId, from, to))]).then(([al, hist]) => {
+            body.innerHTML = renderBody(al, hist, state.listIndex, from, to);
             bindHandlers();
           }).catch(() => { body.innerHTML = '<p style="color:#b00">Error al cargar.</p>'; });
         };
         if (navNext) navNext.onclick = () => {
           if (state.listIndex >= list.length - 1) return;
+          const { from, to } = currentHistDates();
           state.listIndex++;
           state.alumnoId = list[state.listIndex].id;
-          Promise.all([api('/alumnos/' + state.alumnoId), api('/asistencia/alumno/' + state.alumnoId + '/historial')]).then(([al, hist]) => {
-            body.innerHTML = renderBody(al, hist, state.listIndex);
+          Promise.all([api('/alumnos/' + state.alumnoId), api(historialPath(state.alumnoId, from, to))]).then(([al, hist]) => {
+            body.innerHTML = renderBody(al, hist, state.listIndex, from, to);
             bindHandlers();
           }).catch(() => { body.innerHTML = '<p style="color:#b00">Error al cargar.</p>'; });
         };

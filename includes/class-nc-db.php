@@ -7,8 +7,11 @@ class NC_DB {
    * Versión del esquema (no del plugin). Incrementar cuando se agreguen tablas/columnas.
    */
   public static function schema_version(): string {
-    return '1.0.7';
+    return '1.0.8';
   }
+
+  /** Nombre resuelto de la tabla de grupos (conducta_grupos, o legado conducta_aulas). */
+  private static ?string $table_grupos_name = null;
 
   /**
    * Corre dbDelta si el esquema cambió (sin desactivar/activar el plugin).
@@ -18,6 +21,7 @@ class NC_DB {
     // Nota: estas rutinas autogestionan el nombre real de la tabla.
     self::force_alumnos_foto_url_text();
     self::normalize_alumnos_foto_url_values();
+    self::migrate_aulas_table_to_grupos();
 
     $stored = get_option('nc_schema_version', '0.0.0');
     if (version_compare($stored, self::schema_version(), '>=')) {
@@ -31,11 +35,33 @@ class NC_DB {
   }
 
   public static function activate() {
+    self::migrate_aulas_table_to_grupos();
     self::ensure_schema_updates();
     self::migrate_conducta_column_names();
     self::migrate_aula_to_grupo_columns();
     self::migrate_alumnos_legacy();
     update_option('nc_schema_version', self::schema_version());
+  }
+
+  /**
+   * Nombre real de la tabla de grupos.
+   * Prefiere `conducta_grupos`; si la migración aún no corrió, usa el legado `conducta_aulas`.
+   */
+  public static function table_grupos(): string {
+    global $wpdb;
+    if (self::$table_grupos_name !== null) {
+      return self::$table_grupos_name;
+    }
+    $new = $wpdb->prefix . 'conducta_grupos';
+    $old = $wpdb->prefix . 'conducta_aulas';
+    if (self::table_exists($new)) {
+      self::$table_grupos_name = $new;
+    } elseif (self::table_exists($old)) {
+      self::$table_grupos_name = $old;
+    } else {
+      self::$table_grupos_name = $new;
+    }
+    return self::$table_grupos_name;
   }
 
   /**
@@ -45,12 +71,14 @@ class NC_DB {
     global $wpdb;
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
+    self::migrate_aulas_table_to_grupos();
+
     $charset = $wpdb->get_charset_collate();
 
     $t_fac   = $wpdb->prefix . 'conducta_facultades';
     $t_car   = $wpdb->prefix . 'conducta_carreras';
     $t_cur   = $wpdb->prefix . 'conducta_cursos';
-    $t_aul   = $wpdb->prefix . 'conducta_aulas';
+    $t_aul   = self::table_grupos();
     $t_al    = $wpdb->prefix . 'conducta_alumnos';
     $t_al_c  = $wpdb->prefix . 'conducta_alumno_cursos';
     $t_al_a  = $wpdb->prefix . 'conducta_alumno_aulas';
@@ -102,7 +130,7 @@ class NC_DB {
     dbDelta($sql);
     self::ensure_cursos_activo_column();
 
-    // 4) Aulas (subgrupos: ej. "1,2,3" o "A,B,C" cuando el aula usa subgrupos para lista)
+    // 4) Grupos (antes conducta_aulas; subgrupos: ej. "1,2,3" o "A,B,C")
     $sql = "CREATE TABLE $t_aul (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       nombre VARCHAR(191) NOT NULL,
@@ -393,12 +421,49 @@ class NC_DB {
     $wpdb->query("ALTER TABLE `$t_al` ADD COLUMN subgrupo VARCHAR(20) NULL AFTER carrera_id, ADD KEY subgrupo (subgrupo)");
   }
 
-  /** Añade columna subgrupos a conducta_aulas si no existe (ej. "1,2,3" o "A,B,C"). */
+  /** Añade columna subgrupos a conducta_grupos si no existe (ej. "1,2,3" o "A,B,C"). */
   private static function ensure_aulas_subgrupos_column() {
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = self::table_grupos();
     if (self::table_has_column($t_aul, 'subgrupos')) return;
     $wpdb->query("ALTER TABLE `$t_aul` ADD COLUMN subgrupos VARCHAR(100) NULL AFTER turno");
+  }
+
+  /** ¿Existe la tabla en la BD actual? */
+  private static function table_exists(string $table): bool {
+    global $wpdb;
+    if (!$wpdb instanceof wpdb || $table === '') {
+      return false;
+    }
+    return $wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($table) . "'") === $table;
+  }
+
+  /**
+   * Renombra conducta_aulas → conducta_grupos (conserva datos, índices e IDs).
+   * Idempotente: no hace nada si ya está migrada o si no existe la tabla vieja.
+   */
+  public static function migrate_aulas_table_to_grupos(): void {
+    global $wpdb;
+    if (!$wpdb instanceof wpdb) {
+      return;
+    }
+    $new = $wpdb->prefix . 'conducta_grupos';
+    $old = $wpdb->prefix . 'conducta_aulas';
+    $has_new = self::table_exists($new);
+    $has_old = self::table_exists($old);
+
+    if ($has_old && !$has_new) {
+      $wpdb->query("RENAME TABLE `$old` TO `$new`");
+    } elseif ($has_old && $has_new) {
+      $new_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$new`");
+      $old_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$old`");
+      if ($new_count === 0 && $old_count > 0) {
+        $wpdb->query("DROP TABLE `$new`");
+        $wpdb->query("RENAME TABLE `$old` TO `$new`");
+      }
+    }
+
+    self::$table_grupos_name = null;
   }
 
   /** Añade columna activo a conducta_cursos si no existe (para toggle activo/inactivo). */

@@ -514,7 +514,8 @@
           style.id = 'nc-loader-styles';
           style.textContent = `
             #opm-root.nc-loading .nc-wrap { visibility: hidden; }
-            .nc-loading-overlay { position: fixed; inset: 0; background: rgba(245,245,245,0.98); display: flex; align-items: center; justify-content: center; z-index: 99998; }
+            .nc-loading-overlay { position: fixed; inset: 0; background: var(--opm-bg, #F6F8FC); display: flex; align-items: center; justify-content: center; z-index: 99998; }
+            body.opm-theme-dark .nc-loading-overlay .typewriter { --paper: #1E293B; --text: #64748B; --key: #F8FAFC; }
             .nc-loading-overlay .typewriter { --blue: #5C86FF; --blue-dark: #275EFE; --key: #fff; --paper: #EEF0FD; --text: #D3D4EC; --tool: #FBC56C; --duration: 3s; position: relative; animation: nc-bounce05 var(--duration) linear infinite; }
             .nc-loading-overlay .typewriter .slide { width: 92px; height: 20px; border-radius: 3px; margin-left: 14px; transform: translateX(14px); background: linear-gradient(var(--blue), var(--blue-dark)); animation: nc-slide05 var(--duration) ease infinite; }
             .nc-loading-overlay .typewriter .slide:before, .nc-loading-overlay .typewriter .slide:after, .nc-loading-overlay .typewriter .slide i:before { content: ""; position: absolute; background: var(--tool); }
@@ -562,8 +563,9 @@
         }
         t.style.background = type === 'err' ? '#e74c3c' : '#27ae60';
         t.textContent = msg;
+        t.style.display = 'block';
         t.style.opacity = '1';
-        setTimeout(() => { t.style.opacity = '0'; }, 3000);
+        setTimeout(() => { t.style.opacity = '0'; t.style.display = 'none'; }, 3000);
       }
     
       function escapeHtml(text) {
@@ -1392,7 +1394,7 @@
 
   function renderConductaLineChart(container, rows) {
     if (!container || !Array.isArray(rows) || rows.length === 0) {
-      if (container) container.innerHTML = '<div style="padding:20px;text-align:center;color:#666;font-size:13px">Sin datos para graficar</div>';
+      if (container) container.innerHTML = '<div class="opm-empty" style="padding:20px;text-align:center">Sin datos para graficar</div>';
       return;
     }
     const pad = { top: 10, right: 10, bottom: 28, left: 32 };
@@ -1410,13 +1412,13 @@
     const xScale = (i) => pad.left + (dates.length > 1 ? (i / (dates.length - 1)) * w : 0);
     const yScale = (v) => pad.top + h - (Number(v) / (maxY - minY)) * h;
     const pathD = values.map((v, i) => (i === 0 ? 'M' : 'L') + xScale(i).toFixed(1) + ',' + yScale(v).toFixed(1)).join(' ');
-    const labels = dates.map((d, i) => `<text x="${xScale(i)}" y="${h + pad.bottom - 6}" font-size="10" fill="#555" text-anchor="middle">${(d || '').slice(5)}</text>`).join('');
-    const yTicks = [0, 1, 2, 3, 4, 5].map(v => `<line x1="${pad.left}" y1="${yScale(v)}" x2="${pad.left + w}" y2="${yScale(v)}" stroke="#eee" stroke-width="1"/>`);
+    const labels = dates.map((d, i) => `<text x="${xScale(i)}" y="${h + pad.bottom - 6}" font-size="10" fill="var(--opm-muted)" text-anchor="middle">${(d || '').slice(5)}</text>`).join('');
+    const yTicks = [0, 1, 2, 3, 4, 5].map(v => `<line x1="${pad.left}" y1="${yScale(v)}" x2="${pad.left + w}" y2="${yScale(v)}" stroke="var(--opm-border)" stroke-width="1"/>`);
     container.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${pad.left + w + pad.right} ${pad.top + h + pad.bottom}" preserveAspectRatio="xMidYMid meet">
       ${yTicks.join('')}
-      <path d="${pathD}" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${pathD}" fill="none" stroke="var(--opm-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       ${labels}
-      <text x="${pad.left - 8}" y="${pad.top + h/2}" font-size="10" fill="#555" text-anchor="middle" transform="rotate(-90 ${pad.left - 8} ${pad.top + h/2})">Promedio 0-5</text>
+      <text x="${pad.left - 8}" y="${pad.top + h/2}" font-size="10" fill="var(--opm-muted)" text-anchor="middle" transform="rotate(-90 ${pad.left - 8} ${pad.top + h/2})">Promedio 0-5</text>
     </svg>`;
   }
 
@@ -1428,318 +1430,363 @@
   let carrerasByFac = {};
   let baseLoaded = false;
 
-  // -------- Layout base
+  // -------- Layout base (OPM shell)
+  document.body.classList.add('opm-app-page');
+
+  function applyWpHeaderOffset() {
+    const candidates = [
+      '.elementor-location-header',
+      '#masthead',
+      '.site-header',
+      'header.site-header',
+      '.main-header-bar',
+      '#header',
+      'header[role="banner"]',
+    ];
+    let h = 70;
+    for (const sel of candidates) {
+      const node = document.querySelector(sel);
+      if (!node) continue;
+      const r = node.getBoundingClientRect();
+      if (r.height > 20 && r.bottom > 0) {
+        h = Math.max(48, Math.round(r.bottom));
+        break;
+      }
+    }
+    const adminbar = document.getElementById('wpadminbar');
+    if (adminbar) {
+      const ab = adminbar.getBoundingClientRect();
+      if (ab.height > 0 && h < ab.bottom) h = Math.round(ab.bottom);
+    }
+    document.documentElement.style.setProperty('--opm-wp-header-h', h + 'px');
+  }
+  applyWpHeaderOffset();
+  window.addEventListener('resize', applyWpHeaderOffset);
+  window.addEventListener('scroll', applyWpHeaderOffset, { passive: true });
+
+  const opmIcons = {
+    dashboard: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>',
+    conducta: '<svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>',
+    asistencia: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="m8 15 2 2 5-5"/></svg>',
+    puntajes: '<svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-6"/><path d="M12 16V8"/><path d="M16 16v-9"/></svg>',
+    reportes: '<svg viewBox="0 0 24 24"><path d="M7 3h8l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M15 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>',
+    admin: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a7.7 7.7 0 0 0 .1-1.9l2-1.2-2-3.4-2.3.5a7.4 7.4 0 0 0-1.6-1L15 4h-4l-.6 2.5a7.4 7.4 0 0 0-1.6 1L6.5 7l-2 3.4 2 1.2a7.7 7.7 0 0 0 .1 1.9l-2 1.2 2 3.4 2.3-.5a7.4 7.4 0 0 0 1.6 1L11 22h4l.6-2.5a7.4 7.4 0 0 0 1.6-1l2.3.5 2-3.4Z"/></svg>',
+    search: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 3a6 6 0 00-6 6v2.7L4 16h16l-2-4.3V9a6 6 0 00-6-6zm0 18a2.2 2.2 0 01-2.2-2h4.4A2.2 2.2 0 0112 21z"/></svg>',
+    menu: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="2" rx="1"/><rect x="4" y="11" width="16" height="2" rx="1"/><rect x="4" y="16" width="16" height="2" rx="1"/></svg>',
+    chevron: '<svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  };
+
+  let headerSearchPending = '';
+  const opmUser = (typeof NC_APP !== 'undefined' && NC_APP) ? NC_APP : {};
+  const opmDisplayName = String(opmUser.displayName || '').trim();
+  const opmHelloName = opmDisplayName.split(/\s+/)[0] || 'usuario';
+  const opmRoleLabel = String(opmUser.roleLabel || '').trim() || '';
+  const opmAvatarUrl = String(opmUser.avatarUrl || '').trim();
+  const opmInitial = (opmHelloName.charAt(0) || 'U').toUpperCase();
+
+  function setOpmSidebarOpen(open) {
+    document.body.classList.toggle('opm-sidebar-open', !!open);
+  }
+
+  const OPM_THEME_KEY = 'opm-theme';
+  function getOpmTheme() {
+    try {
+      const stored = localStorage.getItem(OPM_THEME_KEY);
+      if (stored === 'dark' || stored === 'light') return stored;
+    } catch (e) {}
+    return 'light';
+  }
+  function applyOpmTheme(theme) {
+    const dark = theme === 'dark';
+    document.body.classList.toggle('opm-theme-dark', dark);
+    const app = document.querySelector('.opm-app');
+    if (app) app.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const btn = document.getElementById('opm-theme-btn');
+    if (btn) {
+      btn.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+      btn.setAttribute('title', dark ? 'Modo claro' : 'Modo oscuro');
+    }
+  }
+  function setOpmTheme(theme) {
+    try { localStorage.setItem(OPM_THEME_KEY, theme); } catch (e) {}
+    applyOpmTheme(theme);
+  }
+  applyOpmTheme(getOpmTheme());
+
   root.innerHTML = '';
-  root.appendChild(el('style', {}, `
-    .nc-wrap{padding:16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;max-width:1150px}
-    .nc-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-    .nc-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;padding:4px 0;align-items:center}
-    .nc-tab{padding:10px 16px;border-radius:12px;border:1px solid #ddd;background:#f8f9fa;cursor:pointer;font-size:14px;font-weight:500;transition:all .2s ease;color:#333}
-    .nc-tab:hover{background:#e9ecef;border-color:#adb5bd}
-    .nc-tab[data-active="1"]{border-color:#0d6efd;background:linear-gradient(135deg,#0d6efd,#0a58ca);color:#fff;box-shadow:0 2px 8px rgba(13,110,253,.3)}
-    .nc-tab[data-active="1"]:hover{background:linear-gradient(135deg,#0a58ca,#084298);color:#fff}
-    .nc-card{border:1px solid #e6e6e6;border-radius:14px;background:#fff;padding:14px;margin:10px 0}
-    .nc-row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
-    .nc-field{display:flex;flex-direction:column;gap:6px}
-    .nc-field label{font-size:12px;color:#555}
-    .nc-field input,.nc-field select,.nc-field textarea{padding:10px;border-radius:10px;border:1px solid #ddd;min-width:220px}
-    .nc-field textarea{min-width:320px;min-height:90px}
-    .nc-btn{padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;cursor:pointer}
-    .nc-btn.primary{background:#2e7d32;border-color:#2e7d32;color:#fff}
-    .nc-btn.primary:hover{background:#1b5e20;border-color:#1b5e20}
-    .nc-btn.secondary{background:#fff;color:#333;border:1px solid #666;font-weight:500}
-    .nc-btn.secondary:hover{background:#f5f5f5;border-color:#333;color:#000}
-    .nc-btn.danger{background:#b00020;border-color:#b00020}
-    .nc-btn:disabled{opacity:.5;cursor:not-allowed}
-    table{border-collapse:collapse;width:100%}
-    th,td{padding:10px;border-bottom:1px solid #eee;text-align:left;font-size:14px;vertical-align:top}
-    th{font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.04em}
-    .nc-pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#f3f3f3;font-size:12px}
-    #nc-toast{position:fixed;right:16px;bottom:16px;background:#111;color:#fff;padding:12px 14px;border-radius:12px;display:none;max-width:420px;z-index:999999}
-    #nc-toast[data-type="err"]{background:#b00020}
-    .nc-scores select{min-width:70px}
-    .nc-mini{font-size:12px;color:#666}
-    .nc-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .nc-input-sm{min-width:200px}
-    .nc-actions{display:flex;gap:8px;flex-wrap:wrap}
-    .nc-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;overflow-y:auto}
-    .nc-modal{background:#fff;border-radius:16px;max-width:700px;width:100%;max-height:90vh;box-shadow:0 10px 40px rgba(0,0,0,.25);border:1px solid #e6e6e6;display:flex;flex-direction:column;overflow:hidden}
-    .nc-modal-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #eee;flex-shrink:0}
-    .nc-modal-b{padding:16px;overflow-y:auto;flex:1;min-height:0}
-    .nc-modal-f{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;padding:14px 16px;border-top:1px solid #eee;flex-shrink:0}
-    .nc-modal-x{background:#fff;border:2px solid #333;border-radius:10px;cursor:pointer;padding:8px 12px;font-size:24px;line-height:1;color:#333;font-weight:bold;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center;transition:all 0.2s}
-    .nc-modal-x:hover{background:#f5f5f5;border-color:#000;color:#000}
-    .nc-link{background:transparent;border:0;padding:0;margin:0;color:#0b5fff;cursor:pointer;text-decoration:underline;font:inherit}
-    .nc-photo{width:110px;height:110px;border-radius:14px;border:1px solid #eee;object-fit:cover;background:#fafafa}
-    .nc-photo-missing,.nc-photo-badge{width:110px;height:110px;border-radius:14px;border:1px dashed #ddd;display:flex;align-items:center;justify-content:center;background:#fafafa;font-size:12px;color:#555}
-    .nc-badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#f3f3f3;font-size:12px;color:#444}
-            /* Estilos de paginación */
-    .nc-pagination {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 12px 16px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      margin: 16px 0;
-      flex-wrap: wrap;
-    }
-    .nc-pagination-info {
-      font-size: 14px;
-      color: #495057;
-    }
-    .nc-pagination-controls {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .nc-pagination-page {
-      padding: 0 12px;
-      font-weight: 500;
-      color: #212529;
-    }
-    .nc-pagination-jump {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-    }
-    .nc-pagination-jump label {
-      margin: 0;
-      color: #495057;
-    }
-    .nc-btn.small {
-      padding: 6px 12px;
-      font-size: 13px;
-    }
-    /* Selección múltiple */
-    .nc-bulk-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      background: #e7f3ff;
-      border: 1px solid #b3d9ff;
-      border-radius: 8px;
-      margin: 12px 0;
-      flex-wrap: wrap;
-    }
-    .nc-bulk-info {
-      flex: 1;
-      font-size: 14px;
-      color: #004085;
-    }
-    .nc-bulk-info strong {
-      font-weight: 600;
-    }
-    .nc-bulk-buttons {
-      display: flex;
-      gap: 8px;
-    }
-    .nc-checkbox-cell {
-      width: 40px;
-      text-align: center;
-    }
-    .nc-checkbox-cell input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
-      cursor: pointer;
-    }
-    tr.selected {
-      background: #e7f3ff;
-    }
-    @media (max-width: 768px) {
-      .nc-wrap {
-        padding: 12px;
-      }
-      .nc-card {
-        padding: 12px;
-        margin: 8px 0;
-      }
-      .nc-row {
-        flex-direction: column;
-        gap: 12px;
-      }
-      .nc-field {
-        width: 100%;
-      }
-      .nc-field input, .nc-field select, .nc-field textarea {
-        min-width: 100%;
-        width: 100%;
-      }
-      .nc-field textarea {
-        min-width: 100%;
-      }
-      .nc-tabs {
-        flex-direction: row;
-        gap: 6px;
-        overflow-x: auto;
-        padding-bottom: 4px;
-        -webkit-overflow-scrolling: touch;
-      }
-      .nc-tab {
-        flex-shrink: 0;
-        padding: 8px 12px;
-        font-size: 13px;
-      }
-      table {
-        font-size: 12px;
-        display: block;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-      }
-      th, td {
-        padding: 8px 6px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
-      .nc-btn {
-        width: 100%;
-        text-align: center;
-        padding: 12px;
-      }
-      .nc-btn.small {
-        padding: 8px 12px;
-      }
-      .nc-pagination {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 10px;
-      }
-      .nc-pagination-controls {
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .nc-pagination-jump {
-        flex-direction: column;
-        width: 100%;
-      }
-      .nc-bulk-actions {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 10px;
-      }
-      .nc-bulk-buttons {
-        flex-direction: column;
-        width: 100%;
-      }
-      .nc-bulk-buttons button {
-        width: 100%;
-      }
-      .nc-modal {
-        max-width: calc(100% - 32px);
-        max-height: 85vh;
-        margin: 16px;
-      }
-      .nc-modal-b {
-        padding: 12px;
-        overflow-y: auto;
-      }
-      .nc-modal-backdrop {
-        padding: 8px;
-        align-items: flex-start;
-        padding-top: 20px;
-      }
-      .nc-head {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      #nc_dash_stats {
-        grid-template-columns: 1fr;
-      }
-      .nc-scores select {
-        min-width: 60px;
-        font-size: 12px;
-        padding: 6px;
-      }
-      .nc-checkbox-cell {
-        width: 32px;
-      }
-      .nc-checkbox-cell input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-      }
-    }
-    @media (max-width: 480px) {
-      th, td {
-        padding: 6px 4px;
-        font-size: 11px;
-      }
-      .nc-card {
-        padding: 10px;
-      }
-      .nc-field input, .nc-field select, .nc-field textarea {
-        padding: 8px;
-        font-size: 14px;
-      }
-      .nc-btn {
-        padding: 10px;
-        font-size: 14px;
-      }
-    }
-  `));
+  const wrap = el('div', { class: 'opm-app nc-wrap' });
+  wrap.appendChild(el('div', { class: 'opm-sidebar-backdrop', id: 'opm-sidebar-backdrop' }));
 
-  const wrap = el('div', { class: 'nc-wrap' });
-  wrap.appendChild(el('div', { id: 'nc-toast' }));
-  wrap.appendChild(el('div', { class: 'nc-head' }, `
-    <div>
-      <h2 style="margin:0">Newton OPM</h2>
-      <div id="nc-status" style="margin-top:4px;color:#666;font-size:13px"></div>
+  const sidebar = el('aside', { class: 'opm-sidebar', id: 'opm-sidebar' }, `
+    <div class="opm-brand">
+      <p class="opm-brand-title">Newton OPM</p>
+      <p class="opm-brand-sub">Panel académico</p>
+      <div id="nc-status"></div>
     </div>
-  `));
+    <nav class="opm-nav" id="opm-nav"></nav>
+  `);
 
-  const tabs = el('div', { class: 'nc-tabs' });
-  const tabBtns = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'conducta-main', label: 'Conducta' },
-    { id: 'asistencia-main', label: 'Asistencia' },
-    { id: 'puntajes-main', label: 'Puntajes' },
-    { id: 'reportes-main', label: 'Reportes' },
-    { id: 'admin-main', label: 'Administrador' },
-  ].map(t => {
-    const b = el('button', { class: 'nc-tab', 'data-tab': t.id }, t.label);
-    b.onclick = () => openTab(t.id);
-    tabs.appendChild(b);
-    return b;
+  const nav = sidebar.querySelector('#opm-nav');
+  const tabDefs = [
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    {
+      id: 'conducta-main', label: 'Conducta', icon: 'conducta',
+      children: [
+        { label: 'Ver grupos', screen: 'grupos' },
+        { label: 'Conducta individual', screen: 'listado' },
+        { label: 'Conducta grupal', screen: 'conducta' },
+        { label: 'Mis registros', screen: 'mis-registros' },
+      ],
+    },
+    {
+      id: 'asistencia-main', label: 'Asistencia', icon: 'asistencia',
+      children: [
+        { label: 'Resumen', asistenciaSub: 'dashboard' },
+        { label: 'Marcar asistencia', asistenciaSub: 'marcar' },
+        { label: 'Simulacro', asistenciaSub: 'simulacro' },
+        { label: 'Mis asistencias', asistenciaSub: 'mis-asistencias' },
+        { label: 'Reportes', asistenciaSub: 'reportes', perm: 'reportesAsis' },
+        { label: 'Reporte de periodo', asistenciaSub: 'reporte-periodo', perm: 'reportesAsis' },
+        { label: 'Lista de alumnos', asistenciaSub: 'lista-alumnos' },
+        { label: 'Materias', asistenciaSub: 'materias', perm: 'admin' },
+      ],
+    },
+    {
+      id: 'puntajes-main', label: 'Puntajes', icon: 'puntajes',
+      children: [
+        { label: 'Crear examen', examenesSub: 'crear' },
+        { label: 'Medicina (importar)', examenesSub: 'medicina' },
+        { label: 'Cargar puntajes', examenesSub: 'cargar' },
+        { label: 'Ver puntajes', examenesSub: 'ver' },
+      ],
+    },
+    {
+      id: 'reportes-main', label: 'Reportes', icon: 'reportes',
+      children: [
+        { label: 'Reportes por fecha', screen: 'reportes-fecha' },
+        { label: 'Reporte general', screen: 'reportes' },
+      ],
+    },
+    {
+      id: 'admin-main', label: 'Administrador', icon: 'admin',
+      children: [
+        { label: 'Asignación masiva', screen: 'asignacion-masiva', perm: 'students' },
+        { label: 'Nuevo alumno', screen: 'nuevo', perm: 'students' },
+        { label: 'Importar alumnos', screen: 'importar', perm: 'students' },
+        { label: 'Cursos', screen: 'cursos', perm: 'courses' },
+        { label: 'Grupos', screen: 'aulas', perm: 'aulas' },
+        { label: 'Facultades / Carreras', screen: 'facultades', perm: 'facultades' },
+        { label: 'Docentes', screen: 'docentes', perm: 'students' },
+      ],
+    },
+  ];
+
+  function childNavOpts(parentId, child) {
+    const opts = {};
+    if (child.screen) opts.screen = child.screen;
+    if (child.asistenciaSub) opts.asistenciaSub = child.asistenciaSub;
+    if (child.examenesSub) opts.examenesSub = child.examenesSub;
+    return opts;
+  }
+
+  function firstVisibleChild(groupEl) {
+    if (!groupEl) return null;
+    return [...groupEl.querySelectorAll('.opm-nav-subitem')].find(x => x.style.display !== 'none') || null;
+  }
+
+  const tabBtns = [];
+  tabDefs.forEach(t => {
+    const group = el('div', { class: 'opm-nav-group', 'data-tab': t.id });
+    const hasChildren = Array.isArray(t.children) && t.children.length > 0;
+    const b = el('button', { class: 'opm-nav-item', 'data-tab': t.id, type: 'button' },
+      `<span class="opm-nav-icon">${opmIcons[t.icon] || ''}</span><span>${t.label}</span>${hasChildren ? '<span class="opm-nav-caret"></span>' : ''}`);
+    b.onclick = () => {
+      const mobile = window.matchMedia('(max-width: 980px)').matches;
+      if (hasChildren) {
+        const alreadyOpen = group.dataset.open === '1';
+        if (alreadyOpen) {
+          if (mobile) setOpmSidebarOpen(false);
+          return;
+        }
+        document.querySelectorAll('.opm-nav-group').forEach(g => {
+          g.dataset.open = (g === group) ? '1' : '0';
+        });
+        const childBtn = firstVisibleChild(group);
+        const child = t.children.find(c => {
+          if (!childBtn) return false;
+          if (c.screen && childBtn.dataset.screen === c.screen) return true;
+          if (c.asistenciaSub && childBtn.dataset.asisSub === c.asistenciaSub) return true;
+          if (c.examenesSub && childBtn.dataset.examSub === c.examenesSub) return true;
+          return false;
+        }) || t.children[0];
+        openTab(t.id, child ? childNavOpts(t.id, child) : {});
+        return;
+      }
+      openTab(t.id);
+      if (mobile) setOpmSidebarOpen(false);
+    };
+    group.appendChild(b);
+    tabBtns.push(b);
+
+    if (hasChildren) {
+      const sub = el('div', { class: 'opm-nav-sub' });
+      t.children.forEach(child => {
+        const sb = el('button', {
+          class: 'opm-nav-subitem',
+          type: 'button',
+          'data-parent': t.id,
+        }, child.label);
+        if (child.screen) sb.dataset.screen = child.screen;
+        if (child.asistenciaSub) sb.dataset.asisSub = child.asistenciaSub;
+        if (child.examenesSub) sb.dataset.examSub = child.examenesSub;
+        if (child.perm) sb.dataset.perm = child.perm;
+        sb.onclick = (ev) => {
+          ev.stopPropagation();
+          openTab(t.id, childNavOpts(t.id, child));
+          if (window.matchMedia('(max-width: 980px)').matches) setOpmSidebarOpen(false);
+        };
+        sub.appendChild(sb);
+      });
+      group.appendChild(sub);
+    }
+    nav.appendChild(group);
   });
 
-  wrap.appendChild(tabs);
-  
+  const main = el('main', { class: 'opm-main' });
+  const header = el('header', { class: 'opm-header' }, `
+    <button type="button" class="opm-burger" id="opm-burger" aria-label="Abrir menú"><span class="opm-burger-bars" aria-hidden="true"></span></button>
+    <form class="opm-search" id="opm-search-form" role="search">
+      ${opmIcons.search}
+      <input type="search" id="opm-global-search" placeholder="Buscar estudiantes, materias, grupos o reportes..." autocomplete="off" />
+    </form>
+    <div class="opm-header-actions">
+      <button type="button" class="opm-icon-btn" id="opm-theme-btn" aria-label="Cambiar a modo oscuro" title="Modo oscuro"><span class="opm-theme-icon" aria-hidden="true"></span></button>
+      <div class="opm-notif-wrap" id="opm-notif-wrap">
+        <button type="button" class="opm-icon-btn" id="opm-notif-btn" aria-label="Notificaciones"><span class="opm-bell-icon" aria-hidden="true"></span></button>
+        <div class="opm-notif-panel">No hay notificaciones nuevas.</div>
+      </div>
+      <div class="opm-user">
+        ${opmAvatarUrl
+          ? `<img src="${escapeAttr(opmAvatarUrl)}" alt="" />`
+          : `<span class="opm-avatar-fallback">${escapeHtml(opmInitial)}</span>`}
+        <div class="opm-user-meta">
+          <span class="opm-user-hello">Hola, ${escapeHtml(opmHelloName)}</span>
+          ${opmRoleLabel ? `<span class="opm-user-role">${escapeHtml(opmRoleLabel)}</span>` : ''}
+        </div>
+      </div>
+    </div>
+  `);
+
+  const content = el('section', { class: 'opm-content' });
+  const view = el('div', { id: 'nc-view' });
+  content.appendChild(el('div', { id: 'nc-toast' }));
+  content.appendChild(view);
+  main.appendChild(header);
+  main.appendChild(content);
+  wrap.appendChild(sidebar);
+  wrap.appendChild(main);
+  root.appendChild(wrap);
+  applyOpmTheme(getOpmTheme());
+
+  const themeBtn = header.querySelector('#opm-theme-btn');
+  if (themeBtn) {
+    themeBtn.onclick = (e) => {
+      e.stopPropagation();
+      setOpmTheme(getOpmTheme() === 'dark' ? 'light' : 'dark');
+    };
+  }
+
+  const burger = header.querySelector('#opm-burger');
+  const backdrop = wrap.querySelector('#opm-sidebar-backdrop');
+  if (burger) burger.onclick = () => {
+    if (window.matchMedia('(max-width: 980px)').matches) {
+      setOpmSidebarOpen(!document.body.classList.contains('opm-sidebar-open'));
+    } else {
+      document.body.classList.toggle('opm-sidebar-collapsed');
+    }
+  };
+  if (backdrop) backdrop.onclick = () => setOpmSidebarOpen(false);
+
+  const notifWrap = header.querySelector('#opm-notif-wrap');
+  const notifBtn = header.querySelector('#opm-notif-btn');
+  if (notifBtn && notifWrap) {
+    notifBtn.onclick = (e) => {
+      e.stopPropagation();
+      notifWrap.classList.toggle('is-open');
+    };
+    document.addEventListener('click', () => notifWrap.classList.remove('is-open'));
+  }
+
+  const searchForm = header.querySelector('#opm-search-form');
+  if (searchForm) {
+    searchForm.onsubmit = (e) => {
+      e.preventDefault();
+      const q = (header.querySelector('#opm-global-search') || {}).value || '';
+      headerSearchPending = q.trim();
+      navigateScreen('listado');
+    };
+  }
+
   (async function() {
     await userPermissions.load();
-    
-    // Ocultar tabs según permisos
     const tabsToHide = [];
-    
-    if (!userPermissions.canViewReports()) {
-      tabsToHide.push('reportes-main');
-    }
-
-    // Ocultar Puntajes / exámenes para roles no admin (Docente, Funcionario de Oficina, etc.)
-    if (!userPermissions.isAdmin()) {
-      tabsToHide.push('puntajes-main');
-    }
-
+    if (!userPermissions.canViewReports()) tabsToHide.push('reportes-main');
+    if (!userPermissions.isAdmin()) tabsToHide.push('puntajes-main');
     if (!userPermissions.canManageStudents() && !userPermissions.canManageCourses() && !userPermissions.canManageAulas() && !userPermissions.canManageFacultades()) {
       tabsToHide.push('admin-main');
     }
-
-    // Ocultar los tabs
-    tabBtns.forEach(btn => {
-      if (tabsToHide.includes(btn.dataset.tab)) {
-        btn.style.display = 'none';
-      }
+    document.querySelectorAll('.opm-nav-group').forEach(g => {
+      if (tabsToHide.includes(g.dataset.tab)) g.style.display = 'none';
+    });
+    document.querySelectorAll('.opm-nav-subitem').forEach(item => {
+      const perm = item.dataset.perm;
+      if (!perm) return;
+      let hide = false;
+      if (perm === 'admin') hide = !userPermissions.isAdmin();
+      if (perm === 'reportesAsis') hide = !(userPermissions.permissions && userPermissions.permissions.can_view_reportes_asistencia);
+      if (perm === 'students') hide = !userPermissions.canManageStudents();
+      if (perm === 'courses') hide = !userPermissions.canManageCourses();
+      if (perm === 'aulas') hide = !userPermissions.canManageAulas();
+      if (perm === 'facultades') hide = !userPermissions.canManageFacultades();
+      if (hide) item.style.display = 'none';
     });
   })();
 
-  const view = el('div', { id: 'nc-view' });
-  wrap.appendChild(view);
-  root.appendChild(wrap);
-
-  function setActiveTab(id) {
-    tabBtns.forEach(b => b.dataset.active = (b.dataset.tab === id ? '1' : '0'));
+  function setActiveTab(id, extras = {}) {
+    extras = extras || {};
+    document.querySelectorAll('.opm-nav-group').forEach(g => {
+      const isCurrent = g.dataset.tab === id;
+      const hasSub = !!g.querySelector('.opm-nav-sub');
+      g.dataset.open = (isCurrent && hasSub) ? '1' : '0';
+    });
+    tabBtns.forEach(b => {
+      const group = b.closest('.opm-nav-group');
+      const hasSub = group && group.querySelector('.opm-nav-sub');
+      b.dataset.active = (!hasSub && b.dataset.tab === id) ? '1' : '0';
+    });
+    const asisSub = extras.asistenciaSub || null;
+    const examSub = extras.examenesSub || null;
+    const screen = extras.screen || null;
+    document.querySelectorAll('.opm-nav-subitem').forEach(s => {
+      let on = false;
+      if (s.dataset.parent !== id) {
+        s.dataset.active = '0';
+        return;
+      }
+      if (s.dataset.screen && screen && s.dataset.screen === screen) on = true;
+      if (s.dataset.asisSub && asisSub && s.dataset.asisSub === asisSub) on = true;
+      if (s.dataset.examSub && examSub && s.dataset.examSub === examSub) on = true;
+      s.dataset.active = on ? '1' : '0';
+    });
+    const group = document.querySelector(`.opm-nav-group[data-tab="${id}"]`);
+    if (group && group.dataset.open === '1') {
+      const anyOn = [...group.querySelectorAll('.opm-nav-subitem')].some(s => s.dataset.active === '1');
+      if (!anyOn) {
+        const first = firstVisibleChild(group);
+        if (first) first.dataset.active = '1';
+      }
+    }
   }
 
   function renderSectionHub(title, desc, actions) {
@@ -1863,6 +1910,14 @@
   function navigateScreen(screenId) {
     if (window.NC_AppState) window.NC_AppState.persistRoute({ screen: screenId });
     runScreen(screenId);
+    const main = SCREEN_TO_MAIN[screenId];
+    if (main) {
+      setActiveTab(main, {
+        screen: screenId,
+        asistenciaSub: window.NC_AppState ? window.NC_AppState.load().asistenciaSub : null,
+        examenesSub: window.NC_AppState ? window.NC_AppState.load().examenesSub : null,
+      });
+    }
   }
 
   function resolveOpenTabRoute(id, opts) {
@@ -1885,7 +1940,17 @@
   async function openTab(id, opts = {}) {
     opts = opts || {};
     const route = resolveOpenTabRoute(id, opts);
-    setActiveTab(route.mainTab);
+    const asisSub = opts.asistenciaSub !== undefined
+      ? opts.asistenciaSub
+      : (window.NC_AppState ? window.NC_AppState.load().asistenciaSub : null);
+    const examSub = opts.examenesSub !== undefined
+      ? opts.examenesSub
+      : (window.NC_AppState ? window.NC_AppState.load().examenesSub : null);
+    setActiveTab(route.mainTab, {
+      screen: route.screen,
+      asistenciaSub: asisSub,
+      examenesSub: examSub,
+    });
     await loadBase(false);
 
     if (!opts.skipPersist && window.NC_AppState) {
@@ -1899,77 +1964,50 @@
     if (id === 'dashboard' || route.mainTab === 'dashboard') renderDashboard();
 
     if (id === 'conducta-main' || route.mainTab === 'conducta-main') {
-      if (route.screen && runScreen) {
-        runScreen(route.screen);
-      } else {
-        renderSectionHub(
-          'Conducta',
-          'Registro y seguimiento de conducta individual y grupal.',
-          [
-            { label: 'Ver grupos', onClick: () => navigateScreen('grupos') },
-            { label: 'Registrar Conducta Individual', onClick: () => navigateScreen('listado') },
-            { label: 'Registrar Conducta Grupal', onClick: () => navigateScreen('conducta') },
-            { label: 'Mis Registros de Conducta', onClick: () => navigateScreen('mis-registros') },
-          ]
-        );
-      }
+      const conductaScreens = ['grupos', 'listado', 'alumnos', 'conducta', 'mis-registros'];
+      const screen = (route.screen && conductaScreens.includes(route.screen)) ? route.screen : 'grupos';
+      runScreen(screen);
+      setActiveTab('conducta-main', { screen });
     }
 
     if (id === 'asistencia-main' || id === 'asistencia') {
-      const sub = opts.asistenciaSub !== undefined
-        ? opts.asistenciaSub
-        : (window.NC_AppState ? window.NC_AppState.load().asistenciaSub : null);
+      const sub = asisSub;
       if (window.NC_Asistencia && typeof window.NC_Asistencia.render === 'function') {
         await window.NC_Asistencia.render(view, { initialSub: sub });
       } else {
         view.innerHTML = '<div class="nc-card"><p>Módulo de asistencia no disponible. Compruebe que asistencia.js esté cargado.</p></div>';
       }
+      const usedAsis = (window.NC_AppState && window.NC_AppState.load().asistenciaSub) || sub || 'dashboard';
+      setActiveTab('asistencia-main', { asistenciaSub: usedAsis });
     }
 
     if (id === 'puntajes-main' || id === 'puntajes') {
-      const sub = opts.examenesSub !== undefined
-        ? opts.examenesSub
-        : (window.NC_AppState ? window.NC_AppState.load().examenesSub : null);
+      const sub = examSub;
       if (window.NC_Examenes && typeof window.NC_Examenes.render === 'function') {
         await window.NC_Examenes.render(view, { initialSub: sub });
       } else {
         view.innerHTML = '<div class="nc-card"><p>Módulo de puntajes/exámenes no disponible. Compruebe que examenes.js esté cargado.</p></div>';
       }
+      const usedExam = (window.NC_AppState && window.NC_AppState.load().examenesSub) || sub || 'crear';
+      setActiveTab('puntajes-main', { examenesSub: usedExam });
     }
 
     if (id === 'reportes-main' || route.mainTab === 'reportes-main') {
-      if (route.screen === 'reportes-fecha' || route.screen === 'reportes') {
-        renderReportesFecha();
-      } else {
-        renderSectionHub(
-          'Reportes',
-          'Reportes de conducta, asistencia, puntajes y reporte general integrado.',
-          [
-            { label: 'Reportes por fecha', onClick: () => navigateScreen('reportes-fecha'), visible: userPermissions.canViewReports() },
-            { label: 'Reporte General (backend preparado)', onClick: () => navigateScreen('reportes-fecha'), visible: userPermissions.canViewReports() },
-          ]
-        );
-      }
+      const screen = (route.screen === 'reportes' || route.screen === 'reportes-fecha') ? route.screen : 'reportes-fecha';
+      renderReportesFecha();
+      setActiveTab('reportes-main', { screen });
     }
 
     if (id === 'admin-main' || route.mainTab === 'admin-main') {
-      if (route.screen && ['asignacion-masiva', 'nuevo', 'importar', 'cursos', 'aulas', 'facultades', 'docentes'].includes(route.screen)) {
-        runScreen(route.screen);
-      } else {
-        renderSectionHub(
-          'Administrador',
-          'Gestión masiva, alumnos y catálogos académicos.',
-          [
-            { label: 'Asignación masiva', onClick: () => navigateScreen('asignacion-masiva'), visible: userPermissions.canManageStudents() },
-            { label: 'Nuevo Alumno', onClick: () => navigateScreen('nuevo'), visible: userPermissions.canManageStudents() },
-            { label: 'Importar Alumnos', onClick: () => navigateScreen('importar'), visible: userPermissions.canManageStudents() },
-            { label: 'Cursos (CRUD)', onClick: () => navigateScreen('cursos'), visible: userPermissions.canManageCourses() },
-            { label: 'Grupos (CRUD)', onClick: () => navigateScreen('aulas'), visible: userPermissions.canManageAulas() },
-            { label: 'Facultades / Carreras', onClick: () => navigateScreen('facultades'), visible: userPermissions.canManageFacultades() },
-            { label: 'Docentes', onClick: () => navigateScreen('docentes'), visible: userPermissions.canManageStudents() },
-          ]
-        );
+      const adminScreens = ['asignacion-masiva', 'nuevo', 'importar', 'cursos', 'aulas', 'facultades', 'docentes'];
+      let screen = (route.screen && adminScreens.includes(route.screen)) ? route.screen : null;
+      if (!screen) {
+        const group = document.querySelector('.opm-nav-group[data-tab="admin-main"]');
+        const first = firstVisibleChild(group);
+        screen = (first && first.dataset.screen) ? first.dataset.screen : 'asignacion-masiva';
       }
+      runScreen(screen);
+      setActiveTab('admin-main', { screen });
     }
 
     // Compatibilidad: rutas antiguas (ya cubiertas por route.screen vía resolveOpenTabRoute)
@@ -1978,59 +2016,253 @@
     }
   }
 
+  function renderOpmTrendChart(container, rows) {
+    if (!container) return;
+    const pad = { top: 16, right: 12, bottom: 28, left: 36 };
+    const w = 640, h = 170;
+    const sorted = [...(rows || [])].sort((a, b) => String(a.mes || '').localeCompare(String(b.mes || '')));
+    if (!sorted.length) {
+      container.innerHTML = '<div class="opm-empty">No hay datos de tendencia de asistencia.</div>';
+      return;
+    }
+    const values = sorted.map(r => Number(r.porcentaje || 0));
+    const minY = 0, maxY = 100;
+    const xScale = (i) => pad.left + (sorted.length > 1 ? (i / (sorted.length - 1)) * w : w / 2);
+    const yScale = (v) => pad.top + h - ((Number(v) - minY) / (maxY - minY)) * h;
+    const pathD = values.map((v, i) => (i === 0 ? 'M' : 'L') + xScale(i).toFixed(1) + ',' + yScale(v).toFixed(1)).join(' ');
+    const areaD = pathD + ` L ${xScale(values.length - 1).toFixed(1)},${yScale(0)} L ${xScale(0).toFixed(1)},${yScale(0)} Z`;
+    const monthLabel = (m) => {
+      const s = String(m || '');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const d = new Date(s + 'T00:00:00');
+        return d.toLocaleDateString('es-PY', { day: '2-digit', month: 'short' });
+      }
+      if (/^\d{4}-\d{2}$/.test(s)) {
+        const [y, mo] = s.split('-');
+        const d = new Date(Number(y), Number(mo) - 1, 1);
+        return d.toLocaleDateString('es-PY', { month: 'short', year: '2-digit' });
+      }
+      return s;
+    };
+    const labels = sorted.map((r, i) => {
+      const show = sorted.length <= 8 || i === 0 || i === sorted.length - 1 || i % Math.ceil(sorted.length / 6) === 0;
+      if (!show) return '';
+      return `<text x="${xScale(i)}" y="${pad.top + h + 20}" font-size="10" fill="var(--opm-muted)" text-anchor="middle">${escapeHtml(monthLabel(r.mes))}</text>`;
+    }).join('');
+    const last = values[values.length - 1];
+    container.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${pad.left + w + pad.right} ${pad.top + h + pad.bottom}" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="opmTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0D6EFD" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#0D6EFD" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <line x1="${pad.left}" y1="${yScale(50)}" x2="${pad.left + w}" y2="${yScale(50)}" stroke="var(--opm-border)" stroke-dasharray="4 4"/>
+      <path d="${areaD}" fill="url(#opmTrendFill)"/>
+      <path d="${pathD}" fill="none" stroke="var(--opm-blue)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${xScale(values.length - 1)}" cy="${yScale(last)}" r="4" fill="var(--opm-blue)"/>
+      ${labels}
+      <text x="${pad.left - 8}" y="${yScale(100)}" font-size="10" fill="var(--opm-muted)" text-anchor="end">100</text>
+      <text x="${pad.left - 8}" y="${yScale(0)}" font-size="10" fill="var(--opm-muted)" text-anchor="end">0</text>
+    </svg>`;
+  }
+
+  function opmDeltaHtml(current, previous, suffix) {
+    const cur = Number(current || 0);
+    const prev = Number(previous || 0);
+    const diff = Math.round((cur - prev) * 10) / 10;
+    const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
+    const sign = diff > 0 ? '+' : '';
+    return `<div class="opm-kpi-delta ${cls}">${sign}${diff}${suffix || ''} vs. mes anterior</div>`;
+  }
+
+  function fmtPct(n) {
+    const v = Number(n);
+    return Number.isFinite(v) ? v.toFixed(1) + '%' : '0.0%';
+  }
+
   // ===================== DASHBOARD =====================
   function renderDashboard() {
     const today = new Date().toISOString().slice(0, 10);
     const from30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const periodLabel = new Date().toLocaleDateString('es-PY', { month: 'long', year: 'numeric' });
+    const periodLabelCap = periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1);
     view.innerHTML = '';
-    const card = el('div', { class: 'nc-card' }, `
-      <h3 style="margin:0 0 14px">Asistencia</h3>
-      <div id="nc_dash_asistencia_loading" style="opacity:.7">Cargando...</div>
-      <div id="nc_dash_asistencia_content" style="display:none">
-        <div id="nc_dash_asistencia_stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
-        <h4 style="margin:16px 0 8px">Promedio por grupo aula (mes actual)</h4>
-        <div id="nc_dash_asistencia_aulas" style="overflow:auto;margin-bottom:12px"></div>
-        <a href="#" id="nc_dash_asistencia_ver_mas" class="nc-btn" style="display:inline-block;text-decoration:none;color:#fff;background:#2e7d32;padding:8px 16px;border-radius:6px;font-size:13px">Ver dashboard de asistencia completo</a>
+    const card = el('div', { class: 'opm-dash' }, `
+      <div class="opm-dash-hero">
+        <div>
+          <h1>¡Bienvenido a Newton OPM!</h1>
+          <p>Aquí tienes un resumen general de la actividad académica de tu institución.</p>
+        </div>
+        <div class="opm-period-chip">${escapeHtml(periodLabelCap)}</div>
       </div>
-      <div id="nc_dash_asistencia_error" style="display:none;color:#888;font-size:13px">Módulo de asistencia no disponible.</div>
 
-      <h3 style="margin:24px 0 14px">Resumen general</h3>
-      <div class="nc-row nc-row-wrap" style="gap:8px;margin:0 0 12px">
-        <button class="nc-btn secondary small" id="nc_dash_go_conducta">Ir a Conducta</button>
-        <button class="nc-btn secondary small" id="nc_dash_go_asistencia">Ir a Asistencia</button>
-        <button class="nc-btn secondary small" id="nc_dash_go_puntajes">Ir a Puntajes</button>
-        <button class="nc-btn secondary small" id="nc_dash_go_reportes">Ir a Reportes</button>
-        <button class="nc-btn secondary small" id="nc_dash_go_admin">Ir a Administrador</button>
+      <div class="opm-kpi-grid">
+        <div class="opm-kpi is-clickable" id="nc_dash_alumnos_evaluados">
+          <div class="opm-kpi-top">
+            <span class="opm-kpi-label">Total de estudiantes</span>
+            <span class="opm-kpi-ico blue">${opmIcons.conducta}</span>
+          </div>
+          <div class="opm-kpi-value" id="opm_kpi_alumnos">—</div>
+          <div class="opm-kpi-delta flat" id="opm_kpi_alumnos_sub">Cargando...</div>
+        </div>
+        <div class="opm-kpi">
+          <div class="opm-kpi-top">
+            <span class="opm-kpi-label">Asistencia promedio</span>
+            <span class="opm-kpi-ico green">${opmIcons.asistencia}</span>
+          </div>
+          <div class="opm-kpi-value" id="opm_kpi_asistencia">—</div>
+          <div id="opm_kpi_asistencia_delta" class="opm-kpi-delta flat">Cargando...</div>
+        </div>
+        <div class="opm-kpi" id="opm_kpi_examenes_card">
+          <div class="opm-kpi-top">
+            <span class="opm-kpi-label">Exámenes registrados</span>
+            <span class="opm-kpi-ico violet">${opmIcons.puntajes}</span>
+          </div>
+          <div class="opm-kpi-value" id="opm_kpi_examenes">—</div>
+          <div class="opm-kpi-delta flat" id="opm_kpi_examenes_sub">Este periodo</div>
+        </div>
+        <div class="opm-kpi">
+          <div class="opm-kpi-top">
+            <span class="opm-kpi-label">Registros de conducta</span>
+            <span class="opm-kpi-ico gold">${opmIcons.reportes}</span>
+          </div>
+          <div class="opm-kpi-value" id="opm_kpi_conducta">—</div>
+          <div class="opm-kpi-delta flat" id="opm_kpi_conducta_sub">Cargando...</div>
+        </div>
       </div>
-      <div id="nc_dash_stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px">
-        <div style="opacity:.7">Cargando...</div>
+
+      <div class="opm-dash-grid">
+        <div class="opm-panel">
+          <div class="opm-panel-h">
+            <div>
+              <h3>Tendencia de asistencia</h3>
+              <p>Porcentaje de asistencia global por mes.</p>
+            </div>
+            <div class="opm-seg" id="opm_trend_seg">
+              <button type="button" data-agr="mes" data-active="1">Mes</button>
+              <button type="button" data-agr="semanas">Semanas</button>
+              <button type="button" data-agr="dias">Días</button>
+            </div>
+          </div>
+          <div class="opm-trend" id="opm_dash_trend"><div class="opm-empty">Cargando tendencia...</div></div>
+        </div>
+        <div class="opm-panel">
+          <div class="opm-panel-h">
+            <div>
+              <h3>Acciones rápidas</h3>
+              <p>Accede a las tareas más comunes.</p>
+            </div>
+          </div>
+          <div class="opm-quick">
+            <button type="button" class="opm-quick-btn" id="nc_dash_go_asistencia"><span>Marcar asistencia</span><span class="ico blue">${opmIcons.asistencia}</span></button>
+            <button type="button" class="opm-quick-btn" id="nc_dash_go_puntajes"><span>Crear examen</span><span class="ico green">${opmIcons.puntajes}</span></button>
+            <button type="button" class="opm-quick-btn" id="nc_dash_go_conducta"><span>Ver conducta</span><span class="ico violet">${opmIcons.conducta}</span></button>
+            <button type="button" class="opm-quick-btn" id="nc_dash_go_admin"><span>Cargar puntajes</span><span class="ico gold">${opmIcons.admin}</span></button>
+            <button type="button" class="opm-quick-btn" id="nc_dash_go_reportes"><span>Generar reportes</span><span class="ico">${opmIcons.reportes}</span></button>
+            <button type="button" class="opm-quick-btn" id="opm_dash_go_materias"><span>Gestionar materias</span><span class="ico">${opmIcons.admin}</span></button>
+          </div>
+        </div>
       </div>
-      <h4 style="margin:20px 0 10px">Por grupo</h4>
-      <div id="nc_dash_aulas" style="overflow:auto">
-        <div style="opacity:.7">Cargando...</div>
+
+      <div class="opm-dash-grid">
+        <div class="opm-panel">
+          <div class="opm-panel-h">
+            <div>
+              <h3>Últimas asistencias registradas</h3>
+              <p>Registros más recientes del sistema.</p>
+            </div>
+            <button type="button" class="opm-link-btn" id="nc_dash_asistencia_ver_mas">Ver todas</button>
+          </div>
+          <div class="opm-table-wrap" id="opm_dash_sesiones"><div class="opm-empty">Cargando...</div></div>
+        </div>
+        <div class="opm-panel">
+          <div class="opm-panel-h">
+            <div>
+              <h3>Módulos del sistema</h3>
+              <p>Gestiona las principales funcionalidades de Newton OPM.</p>
+            </div>
+          </div>
+          <div class="opm-modules">
+            <button type="button" class="opm-mod" data-goto="conducta-main"><span class="opm-mod-ico blue">${opmIcons.conducta}</span><span><b>Conducta</b><small>Registro y seguimiento individual y grupal.</small></span></button>
+            <button type="button" class="opm-mod" data-goto="asistencia-main"><span class="opm-mod-ico green">${opmIcons.asistencia}</span><span><b>Asistencia</b><small>Control, reportes y análisis de asistencia.</small></span></button>
+            <button type="button" class="opm-mod" data-goto="puntajes-main"><span class="opm-mod-ico violet">${opmIcons.puntajes}</span><span><b>Puntajes</b><small>Carga y gestión de exámenes.</small></span></button>
+            <button type="button" class="opm-mod" data-goto="reportes-main"><span class="opm-mod-ico gold">${opmIcons.reportes}</span><span><b>Reportes</b><small>Reportes de asistencia, rendimiento y más.</small></span></button>
+            <button type="button" class="opm-mod" data-goto="admin-main"><span class="opm-mod-ico navy">${opmIcons.admin}</span><span><b>Administrador</b><small>Gestión de materias, grupos y asignación masiva.</small></span></button>
+          </div>
+        </div>
       </div>
-      <h4 style="margin:24px 0 10px">Distribución de conducta por grupo (0=inaceptable, 5=excelente)</h4>
-      <div class="nc-row" style="margin-bottom:12px">
-        <div class="nc-field"><label>Desde</label><input id="nc_dash_from" type="date" value="${from30}" /></div>
-        <div class="nc-field"><label>Hasta</label><input id="nc_dash_to" type="date" value="${today}" /></div>
-        <button class="nc-btn" id="nc_dash_btn_chart">Actualizar gráficos</button>
+
+      <div id="nc_dash_asistencia_loading" style="display:none"></div>
+      <div id="nc_dash_asistencia_content" style="display:none">
+        <div id="nc_dash_asistencia_stats"></div>
+        <div id="nc_dash_asistencia_aulas"></div>
       </div>
-      <div id="nc_dash_charts"></div>
+      <div id="nc_dash_asistencia_error" style="display:none"></div>
+
+      <h3 class="opm-section-title">Resumen de conducta</h3>
+      <div id="nc_dash_stats" class="opm-kpi-grid" style="margin-bottom:14px"><div class="opm-empty">Cargando...</div></div>
+      <div class="opm-panel" style="margin-bottom:14px">
+        <div class="opm-panel-h"><div><h3>Por grupo</h3></div></div>
+        <div class="opm-table-wrap" id="nc_dash_aulas"><div class="opm-empty">Cargando...</div></div>
+      </div>
+      <details class="opm-panel opm-disclose" id="opm_dash_conducta_dist">
+        <summary class="opm-disclose-h">
+          <div>
+            <h3>Distribución de conducta por grupo</h3>
+            <p>0 = inaceptable, 5 = excelente</p>
+          </div>
+          <span class="opm-disclose-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="opm-disclose-body">
+          <div class="nc-row" style="margin-bottom:12px">
+            <div class="nc-field"><label>Desde</label><input id="nc_dash_from" type="date" value="${from30}" /></div>
+            <div class="nc-field"><label>Hasta</label><input id="nc_dash_to" type="date" value="${today}" /></div>
+            <button class="nc-btn" id="nc_dash_btn_chart">Actualizar gráficos</button>
+          </div>
+          <div id="nc_dash_charts"></div>
+        </div>
+      </details>
     `);
     view.appendChild(card);
+
+    const distPanel = document.getElementById('opm_dash_conducta_dist');
+    if (distPanel) {
+      distPanel.addEventListener('toggle', () => {
+        if (distPanel.open) loadDashboardCharts();
+      });
+    }
+
     const dashGoConducta = document.getElementById('nc_dash_go_conducta');
     const dashGoAsistencia = document.getElementById('nc_dash_go_asistencia');
     const dashGoPuntajes = document.getElementById('nc_dash_go_puntajes');
     const dashGoReportes = document.getElementById('nc_dash_go_reportes');
     const dashGoAdmin = document.getElementById('nc_dash_go_admin');
+    const dashGoMaterias = document.getElementById('opm_dash_go_materias');
     if (dashGoConducta) dashGoConducta.onclick = () => openTab('conducta-main');
-    if (dashGoAsistencia) dashGoAsistencia.onclick = () => openTab('asistencia-main');
+    if (dashGoAsistencia) dashGoAsistencia.onclick = () => openTab('asistencia-main', { asistenciaSub: 'marcar' });
     if (dashGoPuntajes) dashGoPuntajes.onclick = () => openTab('puntajes-main');
     if (dashGoReportes) dashGoReportes.onclick = () => openTab('reportes-main');
-    if (dashGoAdmin) dashGoAdmin.onclick = () => openTab('admin-main');
+    if (dashGoAdmin) dashGoAdmin.onclick = () => openTab('puntajes-main', { examenesSub: 'cargar' });
+    if (dashGoMaterias) dashGoMaterias.onclick = () => openTab('asistencia-main', { asistenciaSub: 'materias' });
     if (!userPermissions.isAdmin() && dashGoPuntajes) dashGoPuntajes.style.display = 'none';
+    if (!userPermissions.isAdmin() && dashGoAdmin) dashGoAdmin.style.display = 'none';
     if (!userPermissions.canViewReports() && dashGoReportes) dashGoReportes.style.display = 'none';
-    if (!userPermissions.canManageStudents() && !userPermissions.canManageCourses() && !userPermissions.canManageAulas() && !userPermissions.canManageFacultades() && dashGoAdmin) dashGoAdmin.style.display = 'none';
+    if (!userPermissions.isAdmin() && dashGoMaterias) dashGoMaterias.style.display = 'none';
+    if (!userPermissions.isAdmin()) {
+      const examCard = document.getElementById('opm_kpi_examenes_card');
+      if (examCard) examCard.style.display = 'none';
+    }
+
+    card.querySelectorAll('.opm-mod[data-goto]').forEach(btn => {
+      if (btn.dataset.goto === 'puntajes-main' && !userPermissions.isAdmin()) btn.style.display = 'none';
+      if (btn.dataset.goto === 'reportes-main' && !userPermissions.canViewReports()) btn.style.display = 'none';
+      if (btn.dataset.goto === 'admin-main' && !userPermissions.canManageStudents() && !userPermissions.canManageCourses() && !userPermissions.canManageAulas() && !userPermissions.canManageFacultades()) btn.style.display = 'none';
+      btn.onclick = () => openTab(btn.dataset.goto);
+    });
+
+    const kpiAlumnosCard = document.getElementById('nc_dash_alumnos_evaluados');
+    if (kpiAlumnosCard) kpiAlumnosCard.onclick = () => { if (window.openAlumnosEvaluadosModal) window.openAlumnosEvaluadosModal(); };
 
     // ---------- Config. subgrupos: manejos básicos de UI ----------
     const tipoSel = document.getElementById('am_sgc_tipo');
@@ -2047,16 +2279,15 @@
         } else {
           cursoWrap.style.display = 'none';
           carreraWrap.style.display = '';
-          // Cargar todas las carreras si aún no se cargaron
           if (!carreraSel.dataset.loaded) {
             (async () => {
               try {
                 const rows = await api('/carreras');
-                let opts = '<option value=\"\">Seleccione carrera</option>';
+                let opts = '<option value="">Seleccione carrera</option>';
                 if (Array.isArray(rows)) {
-                  opts += rows.map(c => `<option value=\"${c.id}\">${escapeHtml(c.nombre)}</option>`).join('');
+                  opts += rows.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
                 } else if (rows && Array.isArray(rows.items)) {
-                  opts += rows.items.map(c => `<option value=\"${c.id}\">${escapeHtml(c.nombre)}</option>`).join('');
+                  opts += rows.items.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
                 }
                 carreraSel.innerHTML = opts;
                 carreraSel.dataset.loaded = '1';
@@ -2076,29 +2307,40 @@
         const data = await api('/dashboard/stats?from=' + encodeURIComponent(fromParam) + '&to=' + encodeURIComponent(toParam));
         const stats = document.getElementById('nc_dash_stats');
         const alumnosEvaluados = data.alumnos_evaluados_mes ?? 0;
+        const totalAlumnos = data.total_alumnos ?? 0;
+        const kpiAl = document.getElementById('opm_kpi_alumnos');
+        const kpiAlSub = document.getElementById('opm_kpi_alumnos_sub');
+        if (kpiAl) kpiAl.textContent = String(totalAlumnos);
+        if (kpiAlSub) kpiAlSub.textContent = `${alumnosEvaluados} evaluados este mes · click para ver`;
+        const kpiCond = document.getElementById('opm_kpi_conducta');
+        const kpiCondSub = document.getElementById('opm_kpi_conducta_sub');
+        if (kpiCond) kpiCond.textContent = String(data.total_registros_conducta ?? data.total_evaluaciones ?? 0);
+        if (kpiCondSub) kpiCondSub.textContent = `${data.total_aulas ?? 0} grupos activos`;
         stats.innerHTML = `
-          <div class="nc-card" style="padding:14px;background:#f0f7ff;border:1px solid #cce;cursor:pointer;transition:all 0.2s;" id="nc_dash_alumnos_evaluados" onclick="if(window.openAlumnosEvaluadosModal) window.openAlumnosEvaluadosModal()" onmouseover="this.style.background='#e0efff';this.style.transform='scale(1.02)'" onmouseout="this.style.background='#f0f7ff';this.style.transform='scale(1)'">
-            <div style="font-size:12px;color:#555">Alumnos evaluados (${new Date().toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})})</div>
-            <div style="font-size:24px;font-weight:700">${alumnosEvaluados}</div>
-            <div style="font-size:11px;color:#888;margin-top:4px">Click para ver detalles</div>
+          <div class="opm-kpi is-clickable" id="nc_dash_alumnos_evaluados_copy">
+            <div class="opm-kpi-label">Alumnos evaluados (${new Date().toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})})</div>
+            <div class="opm-kpi-value">${alumnosEvaluados}</div>
+            <div class="opm-kpi-delta flat">Click para ver detalles</div>
           </div>
-          <div class="nc-card" style="padding:14px;background:#f0fff0;border:1px solid #cec">
-            <div style="font-size:12px;color:#555">Total aulas</div>
-            <div style="font-size:24px;font-weight:700">${data.total_aulas ?? 0}</div>
+          <div class="opm-kpi">
+            <div class="opm-kpi-label">Total aulas</div>
+            <div class="opm-kpi-value">${data.total_aulas ?? 0}</div>
           </div>
-          <div class="nc-card" style="padding:14px;background:#fff8f0;border:1px solid #eec">
-            <div style="font-size:12px;color:#555">Registros conducta</div>
-            <div style="font-size:24px;font-weight:700">${data.total_registros_conducta ?? data.total_evaluaciones ?? 0}</div>
+          <div class="opm-kpi">
+            <div class="opm-kpi-label">Registros conducta</div>
+            <div class="opm-kpi-value">${data.total_registros_conducta ?? data.total_evaluaciones ?? 0}</div>
           </div>
         `;
+        const copyCard = document.getElementById('nc_dash_alumnos_evaluados_copy');
+        if (copyCard) copyCard.onclick = () => { if (window.openAlumnosEvaluadosModal) window.openAlumnosEvaluadosModal(); };
         const aulasDiv = document.getElementById('nc_dash_aulas');
         const porAula = data.por_aula || [];
         if (!porAula.length) {
-          aulasDiv.innerHTML = '<div style="opacity:.7">No hay datos por grupo.</div>';
+          aulasDiv.innerHTML = '<div class="opm-empty">No hay datos por grupo.</div>';
         } else {
           const showAlumnosCol = userPermissions.isAdmin();
           aulasDiv.innerHTML = `
-            <table style="width:100%">
+            <table>
               <thead><tr><th>Grupo</th>${showAlumnosCol ? '<th>Alumnos</th>' : ''}<th>Evaluaciones</th></tr></thead>
               <tbody>
                 ${porAula.map(a => `
@@ -2110,7 +2352,6 @@
             </table>
           `;
         }
-        await loadDashboardCharts();
         (function () {
           const chartBtn = document.getElementById('nc_dash_btn_chart');
           if (chartBtn) chartBtn.onclick = withButtonLock(chartBtn, async () => {
@@ -2123,7 +2364,7 @@
             if (aulasDiv2 && porAula2.length) {
               const showAlumnosCol2 = userPermissions.isAdmin();
               aulasDiv2.innerHTML = `
-              <table style="width:100%">
+              <table>
                 <thead><tr><th>Grupo</th>${showAlumnosCol2 ? '<th>Alumnos</th>' : ''}<th>Evaluaciones</th></tr></thead>
                 <tbody>
                   ${porAula2.map(a => `
@@ -2145,6 +2386,27 @@
       }
     })();
 
+    async function loadTrend(agrupacion) {
+      const cont = document.getElementById('opm_dash_trend');
+      if (!cont) return;
+      try {
+        const historial = await api('/asistencia/dashboard/historial?agrupacion=' + encodeURIComponent(agrupacion || 'mes'));
+        renderOpmTrendChart(cont, historial.meses || []);
+      } catch (e) {
+        cont.innerHTML = '<div class="opm-empty">No se pudo cargar la tendencia.</div>';
+      }
+    }
+    const trendSeg = document.getElementById('opm_trend_seg');
+    if (trendSeg) {
+      trendSeg.querySelectorAll('button').forEach(b => {
+        b.onclick = () => {
+          trendSeg.querySelectorAll('button').forEach(x => x.dataset.active = x === b ? '1' : '0');
+          loadTrend(b.dataset.agr);
+        };
+      });
+    }
+    loadTrend('mes');
+
     (async function loadDashboardAsistencia() {
       const loading = document.getElementById('nc_dash_asistencia_loading');
       const content = document.getElementById('nc_dash_asistencia_content');
@@ -2152,41 +2414,35 @@
       const mesActual = new Date().toISOString().slice(0, 7);
       try {
         const data = await api('/asistencia/dashboard?mes=' + encodeURIComponent(mesActual));
-        if (!loading || !content || !error) return;
-        loading.style.display = 'none';
-        error.style.display = 'none';
-        content.style.display = 'block';
+        if (loading) loading.style.display = 'none';
+        if (error) error.style.display = 'none';
+        if (content) content.style.display = 'none';
         const pctActual = Number(data.promedio_actual ?? 0);
         const pctAnt = Number(data.promedio_anterior ?? 0);
-        const diff = Math.round((pctActual - pctAnt) * 100) / 100;
+        const kpiAsis = document.getElementById('opm_kpi_asistencia');
+        const kpiAsisD = document.getElementById('opm_kpi_asistencia_delta');
+        if (kpiAsis) kpiAsis.textContent = fmtPct(pctActual);
+        if (kpiAsisD) kpiAsisD.outerHTML = opmDeltaHtml(pctActual, pctAnt, ' pp');
         const fmt = (n) => Number(n).toFixed(2);
-        document.getElementById('nc_dash_asistencia_stats').innerHTML = `
-          <div class="nc-card" style="padding:14px;background:#e8f5e9;border:1px solid #a5d6a7">
-            <div style="font-size:12px;color:#555">Promedio mes actual</div>
-            <div style="font-size:22px;font-weight:700">${fmt(pctActual)}%</div>
-          </div>
-          <div class="nc-card" style="padding:14px;background:#fff3e0;border:1px solid #ffcc80">
-            <div style="font-size:12px;color:#555">Promedio mes anterior</div>
-            <div style="font-size:22px;font-weight:700">${fmt(pctAnt)}%</div>
-          </div>
-          <div class="nc-card" style="padding:14px;background:#e3f2fd;border:1px solid #90caf9">
-            <div style="font-size:12px;color:#555">Variación</div>
-            <div style="font-size:22px;font-weight:700">${diff >= 0 ? '+' : ''}${fmt(diff)}%</div>
-          </div>
-          <div class="nc-card" style="padding:14px;background:#fce4ec;border:1px solid #f48fb1">
-            <div style="font-size:12px;color:#555">Sesiones mes actual</div>
-            <div style="font-size:22px;font-weight:700">${data.sesiones_mes_actual ?? 0}</div>
-          </div>
-        `;
+        const statsBox = document.getElementById('nc_dash_asistencia_stats');
+        if (statsBox) {
+          const diff = Math.round((pctActual - pctAnt) * 100) / 100;
+          statsBox.innerHTML = `
+            <div class="opm-kpi"><div class="opm-kpi-label">Promedio mes actual</div><div class="opm-kpi-value">${fmt(pctActual)}%</div></div>
+            <div class="opm-kpi"><div class="opm-kpi-label">Promedio mes anterior</div><div class="opm-kpi-value">${fmt(pctAnt)}%</div></div>
+            <div class="opm-kpi"><div class="opm-kpi-label">Variación</div><div class="opm-kpi-value">${diff >= 0 ? '+' : ''}${fmt(diff)}%</div></div>
+            <div class="opm-kpi"><div class="opm-kpi-label">Sesiones mes actual</div><div class="opm-kpi-value">${data.sesiones_mes_actual ?? 0}</div></div>
+          `;
+        }
         const porAula = data.por_aula || [];
         const aulasDiv = document.getElementById('nc_dash_asistencia_aulas');
         const showPresentesCol = userPermissions.isAdmin();
         if (aulasDiv) {
           if (!porAula.length) {
-            aulasDiv.innerHTML = '<p style="opacity:.7">No hay datos por grupo aula este mes.</p>';
+            aulasDiv.innerHTML = '<p class="opm-empty">No hay datos por grupo aula este mes.</p>';
           } else {
             aulasDiv.innerHTML = `
-              <table style="width:100%">
+              <table>
                 <thead><tr><th>Grupo Aula</th><th>Sesiones</th>${showPresentesCol ? '<th>Presentes / Total</th>' : ''}<th>Porcentaje</th></tr></thead>
                 <tbody>
                   ${porAula.map(a => {
@@ -2213,8 +2469,61 @@
         if (loading) loading.style.display = 'none';
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'block';
+        const kpiAsis = document.getElementById('opm_kpi_asistencia');
+        const kpiAsisD = document.getElementById('opm_kpi_asistencia_delta');
+        if (kpiAsis) kpiAsis.textContent = '—';
+        if (kpiAsisD) kpiAsisD.textContent = 'Módulo no disponible';
       }
     })();
+
+    (async function loadSesionesRecientes() {
+      const box = document.getElementById('opm_dash_sesiones');
+      if (!box) return;
+      try {
+        const res = await api('/asistencia/sesiones');
+        const items = Array.isArray(res) ? res : (res.items || []);
+        const latest = items.slice(0, 6);
+        if (!latest.length) {
+          box.innerHTML = '<div class="opm-empty">Todavía no hay asistencias registradas.</div>';
+          return;
+        }
+        box.innerHTML = `
+          <table>
+            <thead><tr><th>Fecha</th><th>Materia</th><th>Grupo</th><th>Presente</th><th>Registrado por</th></tr></thead>
+            <tbody>
+              ${latest.map(s => {
+                const pt = String(s.presentes_total || '0/0');
+                const [p, t] = pt.split('/').map(n => Number(n) || 0);
+                const ok = t > 0 && p >= t / 2;
+                return `<tr>
+                  <td>${escapeHtml(s.fecha || '')}</td>
+                  <td>${escapeHtml(s.materia_nombre || '')}</td>
+                  <td>${escapeHtml(s.grupo_nombre || s.aula_nombre || '')}</td>
+                  <td><span class="${ok ? 'opm-badge-si' : 'opm-badge-no'}">${escapeHtml(pt)}</span></td>
+                  <td>${escapeHtml(s.creado_por_nombre || '')}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        box.innerHTML = '<div class="opm-empty">No se pudieron cargar las asistencias recientes.</div>';
+      }
+    })();
+
+    if (userPermissions.isAdmin()) {
+      (async function loadExamenesKpi() {
+        try {
+          const res = await api('/examenes');
+          const items = res && Array.isArray(res.items) ? res.items : (Array.isArray(res) ? res : []);
+          const eln = document.getElementById('opm_kpi_examenes');
+          if (eln) eln.textContent = String(items.length);
+        } catch (e) {
+          const eln = document.getElementById('opm_kpi_examenes');
+          if (eln) eln.textContent = '—';
+        }
+      })();
+    }
 
     async function loadDashboardCharts() {
       const from = document.getElementById('nc_dash_from')?.value || from30;
@@ -2225,10 +2534,10 @@
         const res = await api('/dashboard/conducta-por-aula?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
         const porAula = res.por_aula || [];
         if (!porAula.length) {
-          cont.innerHTML = '<div style="opacity:.7;padding:16px">No hay datos de conducta en el rango.</div>';
+          cont.innerHTML = '<div class="opm-empty">No hay datos de conducta en el rango.</div>';
           return;
         }
-        const colors = ['#b71c1c', '#f44336', '#ff9800', '#ffc107', '#66bb6a', '#2e7d32']; // 0=rojo (inaceptable), 5=verde (excelente)
+        const colors = ['#b71c1c', '#f44336', '#ff9800', '#ffc107', '#66bb6a', '#2e7d32'];
         cont.innerHTML = porAula.map(a => {
           const dist = a.distribucion || { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
           const total = [0, 1, 2, 3, 4, 5].reduce((s, i) => s + (dist[i] || 0), 0);
@@ -2238,7 +2547,7 @@
             const pct = total ? (n / maxVal) * 100 : 0;
             return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
               <span style="width:24px;font-size:12px;font-weight:700">${i}</span>
-              <div style="flex:1;height:24px;background:#eee;border-radius:6px;overflow:hidden">
+              <div style="flex:1;height:24px;background:var(--opm-track);border-radius:6px;overflow:hidden">
                 <div style="width:${pct}%;height:100%;background:${colors[i]};transition:width .3s"></div>
               </div>
               <span style="font-size:12px;min-width:32px">${n}</span>
@@ -2247,7 +2556,7 @@
           return `<div class="nc-card" style="margin-bottom:14px;padding:14px">
             <h5 style="margin:0 0 10px">${escapeHtml(a.aula_nombre || 'Grupo ' + a.aula_id)}</h5>
             ${bars}
-            <div style="font-size:11px;color:#666;margin-top:6px">Total registros: ${total}</div>
+            <div style="font-size:11px;color:var(--opm-muted);margin-top:6px">Total registros: ${total}</div>
           </div>`;
         }).join('');
       } catch (e) {
@@ -2683,7 +2992,7 @@
         ${''}
         <button type="button" class="nc-tab" data-am-sub="materias" data-active="0">Inscribir en Materias</button>
         <button type="button" class="nc-tab" data-am-sub="materias-grupo" data-active="0">Materias por grupo</button>
-        ${userPermissions.isAdmin() ? '<button type="button" class="nc-tab" data-am-sub="cursos" data-active="0">Asignar cursos</button>' : ''}
+        ${userPermissions.isAdmin() ? '<button type="button" class="nc-tab" data-am-sub="cursos" data-active="0">Cursos</button>' : ''}
       </div>
       <div id="am_curso_materias_panel" class="nc-card" style="margin-top:0;padding:16px">
         <h4 style="margin:0 0 12px">Materias por curso</h4>
@@ -2768,11 +3077,11 @@
       ` : ''}
       ${userPermissions.isAdmin() ? `
       <div id="am_cursos_panel" class="nc-card" style="margin-top:0;padding:16px;display:none">
-        <h4 style="margin:0 0 12px">Asignar cursos a estudiantes</h4>
-        <p style="margin:0 0 12px;color:#666;font-size:13px">Seleccioná un curso destino y aplicalo a varios estudiantes a la vez. Si necesitás cambiar facultad o carrera, usá las opciones de destino y el botón separado.</p>
+        <h4 style="margin:0 0 12px">Asignar o desvincular cursos</h4>
+        <p style="margin:0 0 12px;color:#666;font-size:13px">Seleccioná un curso y alumnos para asignarlo o desvincularlo. Si necesitás cambiar facultad o carrera, usá las opciones de destino y el botón separado.</p>
         <div class="nc-row" style="flex-wrap:wrap;gap:12px;margin-bottom:12px">
           <div class="nc-field">
-            <label>Curso destino</label>
+            <label>Curso</label>
             <select id="am_cur_curso">${cursosOptions(false)}</select>
           </div>
           <div class="nc-field">
@@ -2805,7 +3114,7 @@
         <div style="overflow:auto;max-height:320px">
           <table><thead><tr><th><input type="checkbox" id="am_cur_select_all" title="Seleccionar todos" /></th><th>Nombre</th><th>CI</th><th>Grupo</th><th>Curso actual</th><th>Carrera</th><th>Facultad</th></tr></thead><tbody id="am_cur_tbody"></tbody></table>
         </div>
-        <p id="am_cur_msg" style="margin:12px 0 0;color:#666;font-size:13px">Seleccioná curso destino y filtros, luego Cargar alumnos.</p>
+        <p id="am_cur_msg" style="margin:12px 0 0;color:#666;font-size:13px">Seleccioná un curso y filtros, luego Cargar alumnos.</p>
       </div>
       ` : ''}
       <div id="am_materias_panel" class="nc-card" style="margin-top:0;padding:16px;display:none">
@@ -3209,7 +3518,11 @@
       }).join('') : '<tr><td colspan="7" style="color:#666">No hay alumnos que coincidan con la búsqueda.</td></tr>';
       if (msgEl) msgEl.style.display = amCurRows.length ? 'none' : 'block';
       const bulk = document.getElementById('am_cur_bulk');
-      if (bulk) { bulk.style.display = amCurSelected.size ? 'block' : 'none'; }
+      if (bulk) {
+        bulk.style.display = amCurSelected.size ? 'block' : 'none';
+        const countEl = bulk.querySelector('#am_cur_count');
+        if (countEl) countEl.textContent = String(amCurSelected.size);
+      }
       const selAll = document.getElementById('am_cur_select_all');
       if (selAll && rows.length) {
         const allIds = rows.map(a => Number(a.id));
@@ -3512,7 +3825,7 @@
     }
     const amCurBulk = document.getElementById('am_cur_bulk');
     if (amCurBulk) {
-      amCurBulk.innerHTML = '<div class="nc-bulk-actions"><div class="nc-bulk-info">Alumnos seleccionados: <strong id="am_cur_count">0</strong></div><div class="nc-bulk-buttons"><button type="button" class="nc-btn primary" id="am_cur_aplicar">Asignar curso</button><button type="button" class="nc-btn secondary" id="am_cur_aplicar_fac">Asignar facultad/carrera</button></div></div>';
+      amCurBulk.innerHTML = '<div class="nc-bulk-actions"><div class="nc-bulk-info">Alumnos seleccionados: <strong id="am_cur_count">0</strong></div><div class="nc-bulk-buttons"><button type="button" class="nc-btn primary" id="am_cur_aplicar">Asignar curso</button><button type="button" class="nc-btn danger" id="am_cur_desvincular">Desvincular curso</button><button type="button" class="nc-btn secondary" id="am_cur_aplicar_fac">Asignar facultad/carrera</button></div></div>';
       const countEl = amCurBulk.querySelector('#am_cur_count');
       function updateAmCurCount() {
         if (countEl) countEl.textContent = String(amCurSelected.size);
@@ -3523,7 +3836,7 @@
         btnAplicar.addEventListener('click', async () => {
           const cursoSel = document.getElementById('am_cur_curso');
           if (!cursoSel || !cursoSel.value) {
-            toast('Seleccioná un curso destino.', 'err');
+            toast('Seleccioná un curso.', 'err');
             return;
           }
           if (!amCurSelected.size) {
@@ -3541,8 +3854,46 @@
               }),
             });
             toast('Curso asignado correctamente a los alumnos seleccionados.');
+            const cargar = document.getElementById('am_cur_cargar');
+            if (cargar) cargar.click();
           } catch (e) {
             toast('Error al asignar curso: ' + (e.message || e), 'err');
+          } finally {
+            setLoading(false);
+          }
+        });
+      }
+      const btnDesvincular = amCurBulk.querySelector('#am_cur_desvincular');
+      if (btnDesvincular) {
+        btnDesvincular.addEventListener('click', async () => {
+          const cursoSel = document.getElementById('am_cur_curso');
+          if (!cursoSel || !cursoSel.value) {
+            toast('Seleccioná el curso a desvincular.', 'err');
+            return;
+          }
+          if (!amCurSelected.size) {
+            toast('Seleccioná al menos un alumno.', 'err');
+            return;
+          }
+          const cursoNombre = cursoSel.options[cursoSel.selectedIndex]
+            ? cursoSel.options[cursoSel.selectedIndex].text
+            : 'el curso seleccionado';
+          if (!confirm('¿Desvincular a los alumnos marcados de ' + cursoNombre + '?')) return;
+          try {
+            setLoading(true);
+            await api('/alumnos/bulk-curso-remove', {
+              method: 'POST',
+              body: JSON.stringify({
+                curso_id: Number(cursoSel.value),
+                alumno_ids: Array.from(amCurSelected),
+              }),
+            });
+            toast('Alumnos desvinculados del curso correctamente.');
+            amCurSelected = new Set();
+            const cargar = document.getElementById('am_cur_cargar');
+            if (cargar) cargar.click();
+          } catch (e) {
+            toast('Error al desvincular curso: ' + (e.message || e), 'err');
           } finally {
             setLoading(false);
           }
@@ -4266,6 +4617,11 @@
     document.getElementById('f_search').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') runListadoSearch();
     });
+    if (typeof headerSearchPending === 'string' && headerSearchPending) {
+      const hs = document.getElementById('f_search');
+      if (hs) hs.value = headerSearchPending;
+      headerSearchPending = '';
+    }
     btnLimpiar.onclick = () => {
       document.getElementById('f_search').value = '';
       document.getElementById('f_curso').value = '';

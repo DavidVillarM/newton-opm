@@ -233,6 +233,13 @@ class NC_Rest {
       'permission_callback' => [__CLASS__, 'can_access'],
     ]);
 
+    // -------- Desvincular masivamente alumnos de un curso --------
+    register_rest_route($ns, '/alumnos/bulk-curso-remove', [
+      'methods'             => WP_REST_Server::CREATABLE,
+      'callback'            => [__CLASS__, 'bulk_remove_alumnos_curso'],
+      'permission_callback' => [__CLASS__, 'can_access'],
+    ]);
+
     // -------- Asignación masiva de subgrupo a alumnos --------
     register_rest_route($ns, '/alumnos/bulk-subgrupo', [
       'methods'             => WP_REST_Server::CREATABLE,
@@ -652,7 +659,7 @@ class NC_Rest {
     $t_fac   = $wpdb->prefix . 'conducta_facultades';
     $t_car   = $wpdb->prefix . 'conducta_carreras';
     $t_al    = $wpdb->prefix . 'conducta_alumnos';
-    $t_aulas = $wpdb->prefix . 'conducta_aulas';
+    $t_aulas = NC_DB::table_grupos();
     $id = (int)$req['id'];
     if ($id <= 0) return self::err('ID inválido.');
 
@@ -747,7 +754,7 @@ class NC_Rest {
     global $wpdb;
     $t_car   = $wpdb->prefix . 'conducta_carreras';
     $t_al    = $wpdb->prefix . 'conducta_alumnos';
-    $t_aulas = $wpdb->prefix . 'conducta_aulas';
+    $t_aulas = NC_DB::table_grupos();
     $id = (int)$req['id'];
     if ($id <= 0) return self::err('ID inválido.');
 
@@ -850,7 +857,7 @@ class NC_Rest {
   public static function delete_curso(WP_REST_Request $req) {
     global $wpdb;
     $t_cur   = $wpdb->prefix . 'conducta_cursos';
-    $t_aul   = $wpdb->prefix . 'conducta_aulas';
+    $t_aul   = NC_DB::table_grupos();
     $t_al    = $wpdb->prefix . 'conducta_alumnos';
     $t_eval  = $wpdb->prefix . 'conducta_evaluaciones';
     $id = (int)$req['id'];
@@ -869,7 +876,7 @@ class NC_Rest {
 
   public static function list_aulas(WP_REST_Request $req) {
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_cur = $wpdb->prefix . 'conducta_cursos';
     $t_fac = $wpdb->prefix . 'conducta_facultades';
     $t_car = $wpdb->prefix . 'conducta_carreras';
@@ -948,7 +955,7 @@ class NC_Rest {
 
   public static function create_aula(WP_REST_Request $req) {
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
 
     $p = self::json_params($req);
     $nombre = self::norm_str($p['nombre'] ?? '');
@@ -986,7 +993,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
 
   public static function update_aula(WP_REST_Request $req) {
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
 
     $id = (int)$req['id'];
     $p = self::json_params($req);
@@ -1017,7 +1024,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
 
   public static function delete_aula(WP_REST_Request $req) {
     global $wpdb;
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
     $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
 
@@ -1172,7 +1179,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
 
     $t_al  = $wpdb->prefix . 'conducta_alumnos';
     $t_cur = $wpdb->prefix . 'conducta_cursos';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_fac = $wpdb->prefix . 'conducta_facultades';
     $t_car = $wpdb->prefix . 'conducta_carreras';
     $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
@@ -1254,7 +1261,7 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     global $wpdb;
     $t_al  = $wpdb->prefix . 'conducta_alumnos';
     $t_cur = $wpdb->prefix . 'conducta_cursos';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $t_fac = $wpdb->prefix . 'conducta_facultades';
     $t_car = $wpdb->prefix . 'conducta_carreras';
     $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
@@ -1291,6 +1298,27 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     }
     $facultad_ids = array_values(array_unique($facultad_ids));
     $carrera_id  = self::int_or_null($req->get_param('carrera_id'));
+    $carrera_ids = [];
+    $raw_car_ids = $req->get_param('carrera_ids');
+    if (($raw_car_ids === null || $raw_car_ids === '') && isset($_GET['carrera_ids'])) {
+      $raw_car_ids = $_GET['carrera_ids'];
+    }
+    if (is_string($raw_car_ids) && $raw_car_ids !== '') {
+      foreach (explode(',', $raw_car_ids) as $part) {
+        $cid = (int) trim($part);
+        if ($cid > 0) {
+          $carrera_ids[] = $cid;
+        }
+      }
+    } elseif (is_array($raw_car_ids)) {
+      foreach ($raw_car_ids as $x) {
+        $cid = (int) $x;
+        if ($cid > 0) {
+          $carrera_ids[] = $cid;
+        }
+      }
+    }
+    $carrera_ids = array_values(array_unique($carrera_ids));
     $subgrupo    = self::norm_str($req->get_param('subgrupo'));
     $materia_id  = self::int_or_null($req->get_param('materia_id'));
 
@@ -1392,7 +1420,16 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
       $where .= ' AND a.facultad_id=%d';
       $params[] = $facultad_id;
     }
-    if ($carrera_id)  { $where .= ' AND a.carrera_id=%d'; $params[] = $carrera_id; }
+    if (!empty($carrera_ids)) {
+      $placeholders = implode(',', array_fill(0, count($carrera_ids), '%d'));
+      $where .= " AND a.carrera_id IN ($placeholders)";
+      foreach ($carrera_ids as $cid) {
+        $params[] = $cid;
+      }
+    } elseif ($carrera_id) {
+      $where .= ' AND a.carrera_id=%d';
+      $params[] = $carrera_id;
+    }
     if ($subgrupo !== '' && self::table_has_column($t_al, 'subgrupo')) {
       $where .= ' AND a.subgrupo=%s';
       $params[] = $subgrupo;
@@ -1650,8 +1687,9 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
       }
     }
 
+    // Alta nueva: puede reemplazar (no hay materias previas). Append también sería equivalente.
     if ($id && class_exists('NC_Rest_Asistencia') && ($curso_id || $aula_id || $carrera_id || $facultad_id)) {
-      NC_Rest_Asistencia::auto_inscribir_alumno_curso_materias($id, $curso_id, $aula_id, true);
+      NC_Rest_Asistencia::auto_inscribir_alumno_curso_materias($id, $curso_id, $aula_id, false);
     }
     if ($id && $aula_id && class_exists('NC_Rest_Examenes')) {
       NC_Rest_Examenes::auto_registrar_alumno_examenes_nu($id, $aula_id);
@@ -1784,36 +1822,21 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
     
       $wpdb->update($t_al, $data, ['id' => $id], $format, ['%d']);
 
-      // Multi-pertenencia: al editar grupo, mover (no acumular) la pertenencia principal.
+      // Multi-pertenencia: al editar, se AGREGA curso/grupo sin quitar los existentes.
+      // Para desvincular usar bulk-curso-remove / bulk-aula-remove.
       $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
       $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
       $has_rel_c = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
       $has_rel_a = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
       if ($has_rel_c && $curso_id) {
         $wpdb->query($wpdb->prepare(
-          "INSERT IGNORE INTO $t_al_c (alumno_id, curso_id) VALUES (%d,%d)",
+          "INSERT INTO $t_al_c (alumno_id, curso_id, activo) VALUES (%d,%d,1)
+           ON DUPLICATE KEY UPDATE activo=1",
           $id,
           $curso_id
         ));
       }
-      $grupo_enviado = array_key_exists('aula_id', $p) || array_key_exists('grupo_id', $p);
-      if ($has_rel_a && $grupo_enviado) {
-        if ($aula_id) {
-          $wpdb->query($wpdb->prepare(
-            "UPDATE $t_al_a SET activo=0 WHERE alumno_id=%d AND aula_id<>%d AND activo=1",
-            $id,
-            $aula_id
-          ));
-          $wpdb->query($wpdb->prepare(
-            "INSERT INTO $t_al_a (alumno_id, aula_id, activo) VALUES (%d,%d,1)
-             ON DUPLICATE KEY UPDATE activo=1",
-            $id,
-            $aula_id
-          ));
-        } else {
-          $wpdb->update($t_al_a, ['activo' => 0], ['alumno_id' => $id], ['%d'], ['%d']);
-        }
-      } elseif ($has_rel_a && $aula_id) {
+      if ($has_rel_a && $aula_id) {
         $wpdb->query($wpdb->prepare(
           "INSERT INTO $t_al_a (alumno_id, aula_id, activo) VALUES (%d,%d,1)
            ON DUPLICATE KEY UPDATE activo=1",
@@ -1822,8 +1845,9 @@ if ($nombre === '') return self::err('El nombre del aula es obligatorio.');
         ));
       }
 
+      // Solo agregar materias del curso/grupo indicado; no sobreescribir las ya inscritas.
       if (class_exists('NC_Rest_Asistencia') && ($curso_id || $aula_id || $carrera_id || $facultad_id)) {
-        NC_Rest_Asistencia::auto_inscribir_alumno_curso_materias($id, $curso_id, $aula_id, true);
+        NC_Rest_Asistencia::auto_inscribir_alumno_curso_materias($id, $curso_id, $aula_id, false);
       }
       if ($aula_id && class_exists('NC_Rest_Examenes')) {
         NC_Rest_Examenes::auto_registrar_alumno_examenes_nu($id, $aula_id);
@@ -2392,7 +2416,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     $t_hdr  = $wpdb->prefix . 'conducta_evaluaciones_hdr';
     $t_it   = $wpdb->prefix . 'conducta_evaluaciones_items';
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_cur  = $wpdb->prefix . 'conducta_cursos';
 
     $tipo     = self::norm_str($req->get_param('tipo')); // 'individual', 'grupal', o ''
@@ -2512,7 +2536,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     $t_hdr  = $wpdb->prefix . 'conducta_evaluaciones_hdr';
     $t_it   = $wpdb->prefix . 'conducta_evaluaciones_items';
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_cur  = $wpdb->prefix . 'conducta_cursos';
     $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
 
@@ -2776,7 +2800,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
   public static function dashboard_stats(WP_REST_Request $req) {
     global $wpdb;
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
     $t_hdr  = $wpdb->prefix . 'conducta_evaluaciones_hdr';
     $t_it   = $wpdb->prefix . 'conducta_evaluaciones_items';
@@ -2875,7 +2899,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
   public static function dashboard_alumnos_evaluados(WP_REST_Request $req) {
     global $wpdb;
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_cur  = $wpdb->prefix . 'conducta_cursos';
     $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
     $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
@@ -3056,7 +3080,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
     $t_hdr  = $wpdb->prefix . 'conducta_evaluaciones_hdr';
     $t_it   = $wpdb->prefix . 'conducta_evaluaciones_items';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
 
     $from = self::norm_str($req->get_param('from'));
     $to   = self::norm_str($req->get_param('to'));
@@ -3128,7 +3152,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     $t_hdr  = $wpdb->prefix . 'conducta_evaluaciones_hdr';
     $t_it   = $wpdb->prefix . 'conducta_evaluaciones_items';
     $t_al   = $wpdb->prefix . 'conducta_alumnos';
-    $t_aul  = $wpdb->prefix . 'conducta_aulas';
+    $t_aul  = NC_DB::table_grupos();
     $t_usr  = $wpdb->users;
 
     $from = self::norm_str($req->get_param('from'));
@@ -3698,7 +3722,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_fac = $wpdb->prefix . 'conducta_facultades';
       $t_car = $wpdb->prefix . 'conducta_carreras';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
     
       // Cache para facultades, carreras, cursos y aulas
       $facultad_cache = [];
@@ -3893,14 +3917,15 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
               ['%d']
             );
             if (class_exists('NC_Rest_Asistencia')) {
-              NC_Rest_Asistencia::sync_alumno_materias((int) $existing->id, $curso_id, $aula_id, true);
+              // Actualizar existente: append (no pisar materias de otros cursos/grupos).
+              NC_Rest_Asistencia::sync_alumno_materias((int) $existing->id, $curso_id, $aula_id, false);
             }
             $results['updated']++;
           } else if (!$existing) {
             $wpdb->insert($t_al, $alumno_data, $formats);
             $new_alumno_id = (int) $wpdb->insert_id;
             if ($new_alumno_id > 0 && class_exists('NC_Rest_Asistencia')) {
-              NC_Rest_Asistencia::sync_alumno_materias($new_alumno_id, $curso_id, $aula_id, true);
+              NC_Rest_Asistencia::sync_alumno_materias($new_alumno_id, $curso_id, $aula_id, false);
             }
             $results['imported']++;
           }
@@ -3992,7 +4017,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
     
       $alumno = $wpdb->get_row($wpdb->prepare(
         "SELECT a.*, c.nombre AS curso_nombre, au.nombre AS aula_nombre 
@@ -4099,7 +4124,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $t_cur = $wpdb->prefix . 'conducta_cursos';
     
       $aula = $wpdb->get_row($wpdb->prepare(
@@ -4223,7 +4248,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
     
       $curso = $wpdb->get_row($wpdb->prepare(
         "SELECT nombre AS curso_nombre FROM $t_cur WHERE id = %d",
@@ -4379,7 +4404,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $t_fac = $wpdb->prefix . 'conducta_facultades';
       $t_car = $wpdb->prefix . 'conducta_carreras';
     
@@ -4417,7 +4442,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       global $wpdb;
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $t_cur = $wpdb->prefix . 'conducta_cursos';
     
       $aula = $wpdb->get_row($wpdb->prepare(
@@ -4453,7 +4478,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
     
       $curso = $wpdb->get_row($wpdb->prepare(
         "SELECT nombre AS curso_nombre FROM $t_cur WHERE id = %d",
@@ -4684,7 +4709,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $t_al = $wpdb->prefix . 'conducta_alumnos';
       $t_eval = $wpdb->prefix . 'conducta_evaluaciones';
       $t_cur = $wpdb->prefix . 'conducta_cursos';
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $t_fac = $wpdb->prefix . 'conducta_facultades';
       $t_car = $wpdb->prefix . 'conducta_carreras';
     
@@ -5109,6 +5134,16 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       $is_admin = NC_Roles::user_is_admin();
       $can_view_reportes_asistencia = NC_Roles::user_can_view_reportes_asistencia();
       
+      $user = wp_get_current_user();
+      $display_name = '';
+      $role_label = '';
+      if ($user && (int) $user->ID > 0) {
+        $display_name = trim((string) ($user->first_name ?: $user->display_name));
+        $role_label = class_exists('NC_Shortcode')
+          ? NC_Shortcode::role_label_for_user($user)
+          : '';
+      }
+
       return self::ok([
         'is_admin' => $is_admin,
         'can_view_evaluator' => $is_admin,
@@ -5120,6 +5155,8 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
         'can_view_reportes_asistencia' => $can_view_reportes_asistencia,
         'can_manage_attendance' => NC_Roles::user_can_manage_all_attendance(),
         'is_docente_or_oficina' => NC_Roles::user_is_docente_or_oficina(),
+        'display_name' => $display_name,
+        'role_label' => $role_label,
       ]);
     }
 
@@ -5219,21 +5256,113 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
 
       // Multi-curso: además de actualizar el curso "principal" del alumno,
       // guardamos la relación (append) en la tabla de relación.
+      // ON DUPLICATE KEY reactiva si antes se había desvinculado (activo=0).
       if ($has_rel_c) {
         $placeholders = implode(',', array_fill(0, count($ids), '%d'));
-        $insSql = "INSERT IGNORE INTO $t_al_c (alumno_id, curso_id)
-                   SELECT id, %d FROM $t_al WHERE id IN ($placeholders)";
+        $insSql = "INSERT INTO $t_al_c (alumno_id, curso_id, activo)
+                   SELECT id, %d, 1 FROM $t_al WHERE id IN ($placeholders)
+                   ON DUPLICATE KEY UPDATE activo=1";
         $insParams = array_merge([$curso_id], $ids);
         $wpdb->query($wpdb->prepare($insSql, $insParams));
       }
 
+      // Append: suma las materias del nuevo curso sin borrar las de cursos/grupos previos.
       if (class_exists('NC_Rest_Asistencia')) {
         foreach ($ids as $aid) {
-          NC_Rest_Asistencia::sync_alumno_materias((int) $aid, $curso_id, null, true);
+          NC_Rest_Asistencia::sync_alumno_materias((int) $aid, $curso_id, null, false);
         }
       }
 
       return self::ok(['updated' => (int)$res, 'curso_id' => $curso_id, 'alumno_ids' => $ids]);
+    }
+
+    /**
+     * Desvincula masivamente alumnos de un curso (marca activo=0 en la relación).
+     * POST /alumnos/bulk-curso-remove
+     * Body: { curso_id: 1, alumno_ids: [1,2,3] }
+     */
+    public static function bulk_remove_alumnos_curso(WP_REST_Request $req) {
+      if (!NC_Roles::user_is_admin()) {
+        return self::err('No tienes permisos para desvincular alumnos de cursos.', 403);
+      }
+      global $wpdb;
+
+      $t_al   = $wpdb->prefix . 'conducta_alumnos';
+      $t_cur  = $wpdb->prefix . 'conducta_cursos';
+      $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+      $has_rel_c = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
+
+      $p = self::json_params($req);
+      $curso_id = self::int_or_null($p['curso_id'] ?? null);
+      $ids = isset($p['alumno_ids']) && is_array($p['alumno_ids']) ? array_map('intval', $p['alumno_ids']) : [];
+
+      if (!$curso_id || $curso_id <= 0) {
+        return self::err('curso_id es obligatorio.', 400);
+      }
+      $ids = array_values(array_filter($ids, fn($v) => is_int($v) && $v > 0));
+      if (empty($ids)) {
+        return self::err('Debe indicar al menos un alumno.', 400);
+      }
+
+      $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $t_cur WHERE id=%d AND activo=1 LIMIT 1", $curso_id));
+      if (!$exists) {
+        return self::err('Curso no encontrado o inactivo.', 404);
+      }
+
+      $updated = 0;
+      if ($has_rel_c) {
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $params = array_merge([$curso_id], $ids);
+        $sql = "UPDATE $t_al_c SET activo=0 WHERE curso_id=%d AND alumno_id IN ($placeholders) AND activo=1";
+        $res = $wpdb->query($wpdb->prepare($sql, $params));
+        if ($res === false) {
+          return self::db_fail('No se pudo desvincular a los alumnos del curso.');
+        }
+        $updated = (int) $res;
+
+        foreach ($ids as $aid) {
+          $legacy_curso = (int) $wpdb->get_var($wpdb->prepare("SELECT curso_id FROM $t_al WHERE id=%d LIMIT 1", $aid));
+          if ($legacy_curso === $curso_id) {
+            $new_curso = $wpdb->get_var($wpdb->prepare(
+              "SELECT ac.curso_id
+               FROM $t_al_c ac
+               INNER JOIN $t_cur c ON c.id=ac.curso_id
+               WHERE ac.alumno_id=%d AND ac.activo=1 AND c.activo=1
+               ORDER BY c.nombre ASC
+               LIMIT 1",
+              $aid
+            ));
+            $new_curso = $new_curso ? (int) $new_curso : null;
+            $wpdb->update($t_al, ['curso_id' => $new_curso], ['id' => $aid], ['%d'], ['%d']);
+          }
+
+          // Solo desinscribe materias del curso desvinculado que no sigan en otras membresías.
+          if (class_exists('NC_Rest_Asistencia')) {
+            NC_Rest_Asistencia::unenroll_alumno_from_membership((int) $aid, $curso_id, null);
+          }
+        }
+      } else {
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $params = array_merge([$curso_id], $ids);
+        $sql = "UPDATE $t_al SET curso_id=NULL WHERE curso_id=%d AND id IN ($placeholders) AND activo=1";
+        $res = $wpdb->query($wpdb->prepare($sql, $params));
+        if ($res === false) {
+          return self::db_fail('No se pudo desvincular a los alumnos del curso.');
+        }
+        $updated = (int) $res;
+
+        if (class_exists('NC_Rest_Asistencia')) {
+          foreach ($ids as $aid) {
+            NC_Rest_Asistencia::unenroll_alumno_from_membership((int) $aid, $curso_id, null);
+          }
+        }
+      }
+
+      return self::ok([
+        'updated' => $updated,
+        'curso_id' => $curso_id,
+        'alumno_ids' => $ids,
+      ]);
     }
 
     /**
@@ -5290,7 +5419,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
         return self::err('No tienes permisos para agregar alumnos a grupos.', 403);
       }
       global $wpdb;
-      $t_aul = $wpdb->prefix . 'conducta_aulas';
+      $t_aul = NC_DB::table_grupos();
       $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
 
       // Si la tabla de relación no existe todavía, no podemos multi-grupo.
@@ -5355,7 +5484,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       }
       global $wpdb;
       $t_al   = $wpdb->prefix . 'conducta_alumnos';
-      $t_aul  = $wpdb->prefix . 'conducta_aulas';
+      $t_aul  = NC_DB::table_grupos();
       $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
       $has_rel_a = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
 
@@ -5383,26 +5512,29 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
 
         foreach ($ids as $aid) {
           $legacy_aula = (int) $wpdb->get_var($wpdb->prepare("SELECT aula_id FROM $t_al WHERE id=%d LIMIT 1", $aid));
-          if ($legacy_aula !== $aula_id) {
-            continue;
+          if ($legacy_aula === $aula_id) {
+            $new_aula = $wpdb->get_var($wpdb->prepare(
+              "SELECT ag.aula_id
+               FROM $t_al_a ag
+               INNER JOIN $t_aul au ON au.id=ag.aula_id
+               WHERE ag.alumno_id=%d AND ag.activo=1 AND au.activo=1
+               ORDER BY au.nombre ASC
+               LIMIT 1",
+              $aid
+            ));
+            $new_aula = $new_aula ? (int) $new_aula : null;
+            $data = ['aula_id' => $new_aula];
+            $fmt  = ['%d'];
+            if (self::table_has_column($t_al, 'grupo_id')) {
+              $data['grupo_id'] = $new_aula;
+              $fmt[] = '%d';
+            }
+            $wpdb->update($t_al, $data, ['id' => $aid], $fmt, ['%d']);
           }
-          $new_aula = $wpdb->get_var($wpdb->prepare(
-            "SELECT ag.aula_id
-             FROM $t_al_a ag
-             INNER JOIN $t_aul au ON au.id=ag.aula_id
-             WHERE ag.alumno_id=%d AND ag.activo=1 AND au.activo=1
-             ORDER BY au.nombre ASC
-             LIMIT 1",
-            $aid
-          ));
-          $new_aula = $new_aula ? (int) $new_aula : null;
-          $data = ['aula_id' => $new_aula];
-          $fmt  = ['%d'];
-          if (self::table_has_column($t_al, 'grupo_id')) {
-            $data['grupo_id'] = $new_aula;
-            $fmt[] = '%d';
+
+          if (class_exists('NC_Rest_Asistencia')) {
+            NC_Rest_Asistencia::unenroll_alumno_from_membership((int) $aid, null, $aula_id);
           }
-          $wpdb->update($t_al, $data, ['id' => $aid], $fmt, ['%d']);
         }
       } else {
         $placeholders = implode(',', array_fill(0, count($ids), '%d'));
@@ -5417,6 +5549,12 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
           return self::db_fail('No se pudo desvincular a los alumnos del grupo.');
         }
         $updated = (int) $res;
+
+        if (class_exists('NC_Rest_Asistencia')) {
+          foreach ($ids as $aid) {
+            NC_Rest_Asistencia::unenroll_alumno_from_membership((int) $aid, null, $aula_id);
+          }
+        }
       }
 
       return self::ok([
@@ -5487,9 +5625,10 @@ public static function bulk_update_alumnos_facultad_carrera(WP_REST_Request $req
         return self::db_fail('No se pudo actualizar facultad/carrera para los alumnos seleccionados.');
       }
 
+      // Facultad/carrera afectan reglas CEA: agregar materias nuevas sin borrar las de otros cursos.
       if (class_exists('NC_Rest_Asistencia')) {
         foreach ($ids as $aid) {
-          NC_Rest_Asistencia::sync_alumno_materias((int) $aid, null, null, true);
+          NC_Rest_Asistencia::sync_alumno_materias((int) $aid, null, null, false);
         }
       }
 

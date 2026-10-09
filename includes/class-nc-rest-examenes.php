@@ -96,7 +96,7 @@ class NC_Rest_Examenes {
       return 'Materia de Ingeniería no válida. Use: Algebra, Aritmetica, Trigonometria, Geometria Analitica, Fisica o Informatica.';
     }
     global $wpdb;
-    $t_aulas = $wpdb->prefix . 'conducta_aulas';
+    $t_aulas = NC_DB::table_grupos();
     $ids = array_values(array_unique(array_filter(array_map('intval', $grupo_ids), static function ($v) { return $v > 0; })));
     if (empty($ids)) return 'Debe seleccionar al menos un grupo válido.';
     $rows = $wpdb->get_results("SELECT id, nombre FROM $t_aulas WHERE id IN (" . implode(',', $ids) . ")", ARRAY_A);
@@ -146,7 +146,7 @@ class NC_Rest_Examenes {
     $aula_id = is_numeric($aula_id) ? (int) $aula_id : 0;
     if ($alumno_id <= 0 || $aula_id <= 0) return ['registrados' => 0, 'examen_ids' => []];
     global $wpdb;
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $aula_nombre = (string) $wpdb->get_var($wpdb->prepare("SELECT nombre FROM $t_aul WHERE id=%d LIMIT 1", $aula_id));
     if (self::ingenieria_grupo_key($aula_nombre) !== 'nu') {
       return ['registrados' => 0, 'examen_ids' => []];
@@ -568,7 +568,7 @@ class NC_Rest_Examenes {
   private static function _get_examen_aulas(int $examen_id): array {
     global $wpdb;
     $t_ea = $wpdb->prefix . 'conducta_examen_aulas';
-    $t_a = $wpdb->prefix . 'conducta_aulas';
+    $t_a = NC_DB::table_grupos();
     $rows = $wpdb->get_results($wpdb->prepare(
       "SELECT ea.aula_id, a.nombre AS aula_nombre
        FROM $t_ea ea
@@ -769,7 +769,7 @@ class NC_Rest_Examenes {
     $t_ex = $wpdb->prefix . 'conducta_examenes';
     $t_al = $wpdb->prefix . 'conducta_alumnos';
     $t_cur = $wpdb->prefix . 'conducta_cursos';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
     $ex = $wpdb->get_row($wpdb->prepare("SELECT id, curso_id FROM $t_ex WHERE id=%d AND activo=1", $examen_id), ARRAY_A);
     if (!$ex) return self::err('Examen no encontrado', 404);
     $curso_id = (int)($ex['curso_id'] ?? 0);
@@ -1000,7 +1000,7 @@ class NC_Rest_Examenes {
     $t_cur = $wpdb->prefix . 'conducta_cursos';
     $t_em = $wpdb->prefix . 'conducta_examen_materias';
     $t_et = $wpdb->prefix . 'conducta_examen_temas';
-    $t_aul = $wpdb->prefix . 'conducta_aulas';
+    $t_aul = NC_DB::table_grupos();
 
     $where = 'e.activo=1';
     $params = [];
