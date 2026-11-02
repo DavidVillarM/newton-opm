@@ -53,14 +53,46 @@ class NC_Rest_Asistencia {
     return strcasecmp(trim((string) ($r['subgrupo'] ?? '')), 'Simulacro') === 0;
   }
 
+  /** Bloque 1/2 de un simulacro (dos exámenes el mismo día). Marca en observacion_general. */
+  private static function parse_simulacro_bloque(?string $observacion_general): int {
+    $obs = trim((string) $observacion_general);
+    if ($obs === '') return 0;
+    if (preg_match('/(?:^|\n)\s*Bloque\s*([12])\b/iu', $obs, $m)) {
+      return (int) $m[1];
+    }
+    if (preg_match('/\[NC_SIM_BLOQUE:([12])\]/i', $obs, $m)) {
+      return (int) $m[1];
+    }
+    return 0;
+  }
+
+  private static function format_simulacro_bloque_obs(int $bloque, string $extra = ''): string {
+    $bloque = ($bloque === 2) ? 2 : 1;
+    $mark = 'Bloque ' . $bloque;
+    $extra = trim($extra);
+    // Quitar marcas previas de bloque para no duplicar.
+    if ($extra !== '') {
+      $extra = preg_replace('/(?:^|\n)\s*Bloque\s*[12]\b\s*/iu', '', $extra);
+      $extra = preg_replace('/\[NC_SIM_BLOQUE:[12]\]\s*/i', '', (string) $extra);
+      $extra = trim((string) $extra);
+    }
+    return $extra !== '' ? ($mark . "\n" . $extra) : $mark;
+  }
+
   private static function apply_simulacro_sesion_display(array &$r): void {
     if (!self::is_simulacro_sesion_row($r)) {
       return;
     }
     $r['es_simulacro'] = 1;
+    $bloque = self::parse_simulacro_bloque($r['observacion_general'] ?? null);
+    if ($bloque <= 0) $bloque = 1;
+    $r['bloque'] = $bloque;
     $mn = trim((string) ($r['materia_nombre'] ?? ''));
-    if ($mn !== '' && stripos($mn, 'simulacro') === false) {
-      $r['materia_nombre'] = $mn . ' — Simulacro';
+    // Evitar acumular sufijos si ya se aplicó.
+    $mn = preg_replace('/\s*[—\-]\s*Simulacro(?:\s*[·•]\s*Bloque\s*[12])?\s*$/iu', '', $mn);
+    $mn = trim((string) $mn);
+    if ($mn !== '') {
+      $r['materia_nombre'] = $mn . ' — Simulacro · Bloque ' . $bloque;
     }
     $r['grupo_nombre'] = 'Simulacro';
     $r['grupo_id'] = null;
@@ -488,6 +520,13 @@ class NC_Rest_Asistencia {
         'permission_callback' => [__CLASS__, 'can_access'],
       ],
     ]);
+    register_rest_route($ns, '/asistencia/simulacros/importar', [
+      [
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => [__CLASS__, 'preview_simulacro_excel'],
+        'permission_callback' => [__CLASS__, 'can_access'],
+      ],
+    ]);
     register_rest_route($ns, '/asistencia/simulacros', [
       [
         'methods'             => WP_REST_Server::READABLE,
@@ -755,7 +794,9 @@ class NC_Rest_Asistencia {
       error_log('[NC_Asistencia] list_sesiones SQL error: ' . $wpdb->last_error);
       error_log('[NC_Asistencia] list_sesiones SQL: ' . $sql);
       // Consulta mínima de respaldo (sin JOINs complejos)
-      $sql_fb = "SELECT a.id, a.fecha, a.materia_id, a.aula_id, a.curso_id, a.creado_por, a.docente_encargado_id,
+      $fb_sim = $has_sim_col ? 'a.simulacro_id' : '0 AS simulacro_id';
+      $fb_sub = $has_subgrupo_col ? 'a.subgrupo' : "'' AS subgrupo";
+      $sql_fb = "SELECT a.id, a.fecha, a.materia_id, a.aula_id, a.curso_id, $fb_sim, $fb_sub, a.creado_por, a.docente_encargado_id,
                         a.created_at, a.modified_at, m.nombre AS materia_nombre, c.nombre AS curso_nombre
                  FROM $t_asis a
                  LEFT JOIN $t_mat m ON m.id=a.materia_id
@@ -866,6 +907,7 @@ class NC_Rest_Asistencia {
   }
 
   public static function create_sesion(WP_REST_Request $req) {
+    self::ensure_tables();
     global $wpdb;
     $user_id = get_current_user_id();
     if (!$user_id) return self::err('No autorizado', 401);
@@ -882,6 +924,7 @@ class NC_Rest_Asistencia {
     $subgrupo = isset($p['subgrupo']) ? trim(sanitize_text_field((string) $p['subgrupo'])) : null;
     $subgrupo = ($subgrupo !== '' && $subgrupo !== null) ? $subgrupo : null;
     $simulacro_id = (int) ($p['simulacro_id'] ?? 0);
+    $bloque = (int) ($p['bloque'] ?? 0);
     $items = isset($p['items']) && is_array($p['items']) ? $p['items'] : [];
     if ($fecha === '' || !$materia_id || (!$aula_id && !$grupo_id && $simulacro_id <= 0)) {
       return self::err('fecha, materia_id y al menos grupo_id o aula_id son obligatorios.');
@@ -900,6 +943,33 @@ class NC_Rest_Asistencia {
       $grupo_id = 0;
       $curso_id = null;
       $subgrupo = 'Simulacro';
+      if ($bloque !== 1 && $bloque !== 2) {
+        return self::err('Debés indicar el bloque (1 o 2) para guardar la asistencia del simulacro.', 400);
+      }
+      $observacion_general = self::format_simulacro_bloque_obs($bloque, $observacion_general);
+
+      // Evitar doble carga del mismo bloque el mismo día.
+      if (self::asistencias_has_column('simulacro_id')) {
+        $dup_rows = $wpdb->get_results($wpdb->prepare(
+          "SELECT id, observacion_general FROM $t_asis
+           WHERE activo=1 AND simulacro_id=%d AND fecha=%s
+           ORDER BY id DESC
+           LIMIT 20",
+          $simulacro_id,
+          $fecha
+        ), ARRAY_A) ?: [];
+        foreach ($dup_rows as $dup) {
+          $dup_bloque = self::parse_simulacro_bloque($dup['observacion_general'] ?? null);
+          if ($dup_bloque <= 0) $dup_bloque = 1;
+          if ($dup_bloque === $bloque) {
+            return self::err(
+              'Ya hay asistencia del Bloque ' . $bloque . ' para este simulacro en ' . $fecha
+              . '. No se puede volver a cargar. Andá a Mis asistencias registradas para editarla, o pedile a un administrador que la modifique.',
+              409
+            );
+          }
+        }
+      }
     }
 
     // El curso se infiere por el grupo (nombre / aula.curso_id), no por un alumno o materia compartida.
@@ -928,16 +998,10 @@ class NC_Rest_Asistencia {
       'created_at' => $created_at_py,
       'activo' => 1,
     ];
-    if ($subgrupo !== null && $wpdb->get_var($wpdb->prepare(
-      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'subgrupo'",
-      $t_asis
-    ))) {
+    if ($subgrupo !== null && self::asistencias_has_column('subgrupo')) {
       $insert_data['subgrupo'] = $subgrupo;
     }
-    if ($simulacro_id > 0 && $wpdb->get_var($wpdb->prepare(
-      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'simulacro_id'",
-      $t_asis
-    ))) {
+    if ($simulacro_id > 0 && self::asistencias_has_column('simulacro_id')) {
       $insert_data['simulacro_id'] = $simulacro_id;
     }
     $wpdb->insert($t_asis, $insert_data);
@@ -1431,6 +1495,10 @@ class NC_Rest_Asistencia {
       if (!in_array($agrupacion, ['dias', 'semanas', 'mes'], true)) {
         $agrupacion = 'mes';
       }
+      $hasta = self::norm_str($req->get_param('hasta'));
+      if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $hasta)) {
+        $hasta = date('Y-m-d');
+      }
 
       $meses = [];
       $subq = "(SELECT i.asistencia_id, COUNT(*) AS total, COALESCE(SUM(COALESCE(m.asistio, i.asistio)), 0) AS presentes FROM $t_items i LEFT JOIN $t_mod m ON m.asistencia_id = i.asistencia_id AND m.asistencia_item_id = i.id GROUP BY i.asistencia_id)";
@@ -1443,7 +1511,7 @@ class NC_Rest_Asistencia {
                   COALESCE(SUM(i.presentes),0) AS total_presentes
            FROM $t_asis a
            LEFT JOIN $subq i ON i.asistencia_id=a.id
-           WHERE a.activo=1 AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+           WHERE a.activo=1 AND a.fecha >= DATE_SUB('{$hasta}', INTERVAL 30 DAY) AND a.fecha <= '{$hasta}'
            GROUP BY a.fecha
            ORDER BY a.fecha ASC",
           ARRAY_A
@@ -1456,7 +1524,7 @@ class NC_Rest_Asistencia {
                   COALESCE(SUM(i.presentes),0) AS total_presentes
            FROM $t_asis a
            LEFT JOIN $subq i ON i.asistencia_id=a.id
-           WHERE a.activo=1 AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 12 WEEK)
+           WHERE a.activo=1 AND a.fecha >= DATE_SUB('{$hasta}', INTERVAL 12 WEEK) AND a.fecha <= '{$hasta}'
            GROUP BY YEAR(a.fecha), WEEK(a.fecha,3)
            ORDER BY YEAR(a.fecha) ASC, WEEK(a.fecha,3) ASC",
           ARRAY_A
@@ -1469,7 +1537,7 @@ class NC_Rest_Asistencia {
                   COALESCE(SUM(i.presentes),0) AS total_presentes
            FROM $t_asis a
            LEFT JOIN $subq i ON i.asistencia_id=a.id
-           WHERE a.activo=1 AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+           WHERE a.activo=1 AND a.fecha >= DATE_SUB('{$hasta}', INTERVAL 12 MONTH) AND a.fecha <= '{$hasta}'
            GROUP BY DATE_FORMAT(a.fecha,'%Y-%m')
            ORDER BY mes ASC",
           ARRAY_A
@@ -1502,7 +1570,7 @@ class NC_Rest_Asistencia {
            FROM $t_asis a
            LEFT JOIN $t_aul au ON au.id=a.aula_id
            LEFT JOIN $subq ii ON ii.asistencia_id=a.id
-           WHERE a.activo=1 AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+           WHERE a.activo=1 AND a.fecha >= DATE_SUB('{$hasta}', INTERVAL 12 MONTH) AND a.fecha <= '{$hasta}'
            GROUP BY DATE_FORMAT(a.fecha,'%Y-%m'), a.aula_id, au.nombre
            ORDER BY mes DESC, au.nombre",
           ARRAY_A
@@ -1630,6 +1698,10 @@ class NC_Rest_Asistencia {
         if (self::is_cna_grupo_nombre($nombre_au)) {
           $grupo_ids_curso[] = $aid;
         }
+        continue;
+      }
+      if (self::is_cea_curso_nombre($curso_nombre) && self::grupo_es_cea_ingenieria($nombre_au)) {
+        $grupo_ids_curso[] = $aid;
         continue;
       }
       $by_name = self::match_curso_id_from_grupo_nombre($nombre_au);
@@ -2244,6 +2316,43 @@ class NC_Rest_Asistencia {
     return in_array('presencial', $tokens, true) || in_array('virtual', $tokens, true);
   }
 
+  /** Mu, Nu y Zeta son grupos de CEA (ingreso a Ingeniería), no de CNA. */
+  public static function grupo_es_cea_ingenieria($grupo_nombre): bool {
+    $tokens = self::normalize_text_tokens($grupo_nombre);
+    if (empty($tokens) || in_array('cna', $tokens, true)) return false;
+    foreach (['mu', 'nu', 'zeta'] as $letra) {
+      if (in_array($letra, $tokens, true)) return true;
+    }
+    return false;
+  }
+
+  public static function id_curso_cea(): int {
+    $fallback = 0;
+    foreach (self::get_cursos_catalog() as $c) {
+      $tokens = self::normalize_text_tokens($c['nombre'] ?? '');
+      if (in_array('cna', $tokens, true) || !in_array('cea', $tokens, true)) continue;
+      $id = (int) ($c['id'] ?? 0);
+      if ($id <= 0) continue;
+      if ($tokens === ['cea']) return $id;
+      if ($fallback === 0) $fallback = $id;
+    }
+    return $fallback;
+  }
+
+  public static function nombre_curso_cea(): string {
+    $id = self::id_curso_cea();
+    if ($id > 0) {
+      $nombre = self::curso_nombre_by_id($id);
+      if ($nombre !== '') return $nombre;
+    }
+    return 'CEA';
+  }
+
+  private static function is_cea_curso_nombre($curso_nombre): bool {
+    $tokens = self::normalize_text_tokens($curso_nombre);
+    return in_array('cea', $tokens, true) && !in_array('cna', $tokens, true);
+  }
+
   private static function cna_grupo_ids(): array {
     global $wpdb;
     $t_aul = NC_DB::table_grupos();
@@ -2403,6 +2512,10 @@ class NC_Rest_Asistencia {
    * devuelve ese curso. CNA solo coincide con CNA Presencial y CNA Virtual.
    */
   private static function match_curso_id_from_grupo_nombre($grupo_nombre): ?int {
+    if (self::grupo_es_cea_ingenieria($grupo_nombre)) {
+      $cea_id = self::id_curso_cea();
+      return $cea_id > 0 ? $cea_id : null;
+    }
     $tokens = self::normalize_text_tokens($grupo_nombre);
     if (empty($tokens)) return null;
     $token_set = array_fill_keys($tokens, true);
@@ -2462,6 +2575,11 @@ class NC_Rest_Asistencia {
         $aula_nombre = (string) ($aula['nombre'] ?? '');
         $aula_curso_id = (int) ($aula['curso_id'] ?? 0);
       }
+    }
+
+    if (self::grupo_es_cea_ingenieria($aula_nombre)) {
+      $cea_id = self::id_curso_cea();
+      return $cea_id > 0 ? $cea_id : null;
     }
 
     $by_name = self::match_curso_id_from_grupo_nombre($aula_nombre);
@@ -3356,7 +3474,8 @@ class NC_Rest_Asistencia {
     $sql = "SELECT i.id AS item_id, COALESCE(mod_asist.asistio, i.asistio) AS asistio,
                    COALESCE(NULLIF(TRIM(mod_asist.observacion), ''), i.observacion) AS observacion,
                    i.modified_at AS item_modified_at,
-                   s.id AS asistencia_id, s.fecha, s.materia_id, s.simulacro_id, s.subgrupo, s.creado_por, s.docente_encargado_id,
+                   s.id AS asistencia_id, s.fecha, s.materia_id, s.simulacro_id, s.subgrupo, s.observacion_general,
+                   s.creado_por, s.docente_encargado_id,
                    s.created_at AS sesion_created_at,
                    m.nombre AS materia_nombre,
                    u.display_name AS docente_nombre,
@@ -4203,6 +4322,12 @@ class NC_Rest_Asistencia {
       'docente_examen_nombre' => $docente_name !== '' ? $docente_name : 'Examen',
       'materias_examen' => self::list_materias_examen(),
     ]);
+  }
+
+  public static function preview_simulacro_excel(WP_REST_Request $req) {
+    $out = NC_Simulacro_Import::preview($req);
+    if (is_wp_error($out)) return $out;
+    return self::ok($out);
   }
 
   public static function list_simulacros(WP_REST_Request $req) {

@@ -191,6 +191,13 @@
     return uid > 0 && Number(s.creado_por) === uid;
   }
 
+  function sesionEsSimulacro(s) {
+    if (!s) return false;
+    const sub = String(s.subgrupo || '').trim().toLowerCase();
+    const grupo = String(s.grupo_nombre || '').trim().toLowerCase();
+    return Number(s.es_simulacro) === 1 || Number(s.simulacro_id) > 0 || sub === 'simulacro' || grupo === 'simulacro';
+  }
+
   /** Refuerzo en cliente por si el servidor no aplicó filtros. */
   function filterSesionesItems(items, opts) {
     if (!Array.isArray(items)) return [];
@@ -329,17 +336,26 @@
   ];
 
   function setActiveSub(id) {
-    subTabBtns.forEach(b => b.dataset.active = (b.dataset.sub === id ? '1' : '0'));
+    activeSubId = id;
+    persistActiveSub(id);
+    const highlight = String(id || '').indexOf('simulacro') === 0 ? 'simulacro' : id;
+    subTabBtns.forEach(b => b.dataset.active = (b.dataset.sub === highlight ? '1' : '0'));
+  }
+
+  function isSimulacroSub(id) {
+    return String(id || '').indexOf('simulacro') === 0;
   }
 
   function getPersistedActiveSub(validIds) {
     if (window.NC_AppState) {
       const sub = window.NC_AppState.load().asistenciaSub;
       if (sub && validIds.includes(sub)) return sub;
+      if (sub && isSimulacroSub(sub) && validIds.includes('simulacro')) return sub;
     }
     try {
       const saved = sessionStorage.getItem('nc_asistencia_active_sub');
       if (saved && validIds.includes(saved)) return saved;
+      if (saved && isSimulacroSub(saved) && validIds.includes('simulacro')) return saved;
     } catch (_) { /* ignore */ }
     return 'dashboard';
   }
@@ -469,21 +485,27 @@
     viewEl.appendChild(wrap);
 
     const validSubIds = tabsToShow.map(t => t.id);
-    const initialSub = (opts.initialSub && validSubIds.includes(opts.initialSub))
-      ? opts.initialSub
+    const requested = opts.initialSub || null;
+    const initialSub = (requested && (validSubIds.includes(requested) || isSimulacroSub(requested)))
+      ? requested
       : getPersistedActiveSub(validSubIds);
-    setActiveSub(initialSub);
     renderSub(initialSub);
+  }
+
+  function switchSub(id) {
+    if (!contentEl || !viewEl || !viewEl.contains(contentEl)) return false;
+    renderSub(id || 'dashboard');
+    return true;
   }
 
   async function renderSub(id) {
     if (!contentEl) return;
-    activeSubId = id;
-    persistActiveSub(id);
+    setActiveSub(id);
     if (id === 'dashboard') return renderDashboard();
     if (id === 'marcar') return renderMarcar();
     if (id === 'simulacro') return renderSimulacroHub();
     if (id === 'simulacro-crear') return renderSimulacroCrear();
+    if (id === 'simulacro-importar') return renderSimulacroImportar();
     if (id === 'simulacro-lista') return renderSimulacroLista();
     if (id === 'mis-asistencias') return renderMisAsistencias();
     if (id === 'reportes') return renderReportes();
@@ -2168,7 +2190,8 @@
     let lastReportItems = [];
 
     function grupoLabelSesion(s) {
-      return grupoDisplay(s.grupo_nombre, s.es_simulacro)
+      if (sesionEsSimulacro(s)) return 'Simulacro';
+      return grupoDisplay(s.grupo_nombre, s.es_simulacro, s)
         || aulaFisicaDisplay(s.aula_fisica_nombre)
         || String(s.grupo_nombre || s.aula_fisica_nombre || '');
     }
@@ -2281,8 +2304,8 @@
       return s.toUpperCase();
     }
 
-    function grupoDisplay(nombre, esSimulacro) {
-      if (Number(esSimulacro) === 1 || String(nombre || '').trim() === 'Simulacro') return 'Simulacro';
+    function grupoDisplay(nombre, esSimulacro, sesion) {
+      if (sesionEsSimulacro(sesion) || Number(esSimulacro) === 1 || String(nombre || '').trim().toLowerCase() === 'simulacro') return 'Simulacro';
       let s = String(nombre || '').trim();
       if (!s) return '';
       if (s.includes('->')) s = s.split('->')[1].trim();
@@ -2361,7 +2384,7 @@
                   <td>${escapeHtml(s.materia_nombre || '')}</td>
                   <td>${escapeHtml(s.docente_encargado_nombre || '-')}</td>
                   <td>${escapeHtml(aulaFisicaDisplay(s.aula_fisica_nombre))}</td>
-                  <td>${escapeHtml(grupoDisplay(s.grupo_nombre, s.es_simulacro))}</td>
+                  <td>${escapeHtml(grupoDisplay(s.grupo_nombre, s.es_simulacro, s))}</td>
                   <td>${escapeHtml(reemplazanteDisplay(s))}</td>
                   <td class="nc-presentes-cell">${escapeHtml(s.presentes_total || '0/0')}</td>
                   ${showAuditCols ? '<td>' + escapeHtml(s.creado_por_nombre || '') + '</td><td>' + escapeHtml(s.created_at || '') + '</td><td>' + escapeHtml(s.modificado_por_nombre || '-') + '</td><td>' + escapeHtml(s.modified_at || '-') + '</td>' : ''}
@@ -2985,8 +3008,8 @@
       return s.toUpperCase();
     }
 
-    function grupoDisplay(nombre, esSimulacro) {
-      if (Number(esSimulacro) === 1 || String(nombre || '').trim() === 'Simulacro') return 'Simulacro';
+    function grupoDisplay(nombre, esSimulacro, sesion) {
+      if (sesionEsSimulacro(sesion) || Number(esSimulacro) === 1 || String(nombre || '').trim().toLowerCase() === 'simulacro') return 'Simulacro';
       let s = String(nombre || '').trim();
       if (!s) return '';
       if (s.includes('->')) s = s.split('->')[1].trim();
@@ -3093,7 +3116,7 @@
                   <td>${escapeHtml(s.materia_nombre || '')}</td>
                   <td>${escapeHtml(s.docente_encargado_nombre || '-')}</td>
                   <td>${escapeHtml(aulaFisicaDisplay(s.aula_fisica_nombre))}</td>
-                  <td>${escapeHtml(grupoDisplay(s.grupo_nombre, s.es_simulacro))}</td>
+                  <td>${escapeHtml(grupoDisplay(s.grupo_nombre, s.es_simulacro, s))}</td>
                   <td>${escapeHtml(reemplazanteDisplay(s))}</td>
                   <td class="nc-presentes-cell">${escapeHtml(s.presentes_total || '0/0')}</td>
                   ${showAuditCols ? '<td>' + escapeHtml(s.creado_por_nombre || '') + '</td><td>' + escapeHtml(s.created_at || '') + '</td><td>' + escapeHtml(s.modificado_por_nombre || '-') + '</td><td>' + escapeHtml(s.modified_at || '-') + '</td>' : ''}
@@ -3216,7 +3239,7 @@
               </select>
             </div>
             <p style="margin:0 0 4px;font-size:14px;color:#555">Fecha: ${escapeHtml(sesion.fecha || '-')}</p>
-            <p style="margin:0;font-size:14px;color:#555">Grupo: ${escapeHtml(sesion.aula_nombre || '-')}</p>
+            <p style="margin:0;font-size:14px;color:#555">Grupo: ${escapeHtml(sesion.grupo_label || sesion.aula_nombre || '-')}</p>
           </div>
         </div>
         <h4 style="margin:0 0 8px;font-size:15px;font-weight:600;color:#333">Lista de alumnos <span style="font-weight:400;color:#777;font-size:13px">(${editItemsFull.length} alumnos)</span></h4>
@@ -3414,6 +3437,7 @@
         materia_id: sesion.materia_id,
         materia_nombre: sesion.materia_nombre,
         aula_nombre: sesion.aula_nombre,
+        grupo_label: sesionEsSimulacro(sesion) ? 'Simulacro' : (sesion.grupo_nombre || sesion.aula_nombre || '-'),
         docente_encargado_id: sesion.docente_encargado_id,
         docente_encargado_nombre: sesion.docente_encargado_nombre
       };
@@ -4383,7 +4407,7 @@
   // ---------- Simulacro ----------
   function simulacroBackBtn(label) {
     const b = el('button', { type: 'button', class: 'nc-btn', style: 'margin-bottom:12px;background:#fff;color:#333;border:1px solid #ccc' }, '\u2190 ' + (label || 'Volver'));
-    b.onclick = () => { setActiveSub('simulacro'); renderSimulacroHub(); };
+    b.onclick = () => { renderSub('simulacro'); };
     return b;
   }
 
@@ -4420,25 +4444,467 @@
   async function renderSimulacroHub() {
     if (!contentEl) return;
     contentEl.innerHTML = '<div class="nc-card"><h3 style="margin:0 0 8px">Simulacro</h3>'
-      + '<p style="margin:0 0 20px;opacity:.85;font-size:14px">Cre\u00e1 listas personalizadas para ex\u00e1menes y llam\u00e1 asistencia con esas listas.</p>'
+      + '<p style="margin:0 0 20px;opacity:.85;font-size:14px">Cre\u00e1 listas personalizadas para ex\u00e1menes y llam\u00e1 asistencia con esas listas. Tambi\u00e9n pod\u00e9s importar varias aulas desde un Excel.</p>'
       + '<div class="nc-row" style="gap:12px;flex-wrap:wrap">'
       + '<button type="button" class="nc-btn" id="nc-sim-go-crear" style="min-width:200px">Crear simulacro</button>'
+      + '<button type="button" class="nc-btn" id="nc-sim-go-importar" style="min-width:200px;background:#2e7d32">Importar Excel</button>'
       + '<button type="button" class="nc-btn" id="nc-sim-go-lista" style="min-width:200px;background:#1565c0">Lista simulacro</button>'
       + '</div></div>';
-    contentEl.querySelector('#nc-sim-go-crear').onclick = () => { setActiveSub('simulacro-crear'); renderSimulacroCrear(); };
-    contentEl.querySelector('#nc-sim-go-lista').onclick = () => { setActiveSub('simulacro-lista'); renderSimulacroLista(); };
+    contentEl.querySelector('#nc-sim-go-crear').onclick = () => { renderSub('simulacro-crear'); };
+    contentEl.querySelector('#nc-sim-go-importar').onclick = () => { renderSub('simulacro-importar'); };
+    contentEl.querySelector('#nc-sim-go-lista').onclick = () => { renderSub('simulacro-lista'); };
+  }
+
+  function codigoAulaFlexible(aula) {
+    const raw = String(aula && aula.nombre ? aula.nombre : '').trim();
+    const left = raw.split('->')[0].trim().replace(/^[\s"'(]+|[)"'\s]+$/g, '');
+    const m = left.match(/^([A-Za-z0-9]{1,6})\b/);
+    return m ? m[1].toUpperCase() : left.toUpperCase();
+  }
+
+  function etiquetaAulaImport(aula) {
+    const code = codigoAulaFlexible(aula);
+    const raw = String(aula && aula.nombre ? aula.nombre : '');
+    const right = raw.indexOf('->') !== -1 ? raw.split('->').slice(1).join('->').trim() : '';
+    if (right && right.toUpperCase() !== code) return code + ' \u2014 ' + right;
+    return code || raw;
+  }
+
+  function alumnoTxtImport(a) {
+    if (!a) return '';
+    const ape = String(a.apellidos || '').trim();
+    const nom = String(a.nombres || '').trim();
+    const base = ape && nom ? (ape + ', ' + nom) : (ape || nom);
+    return base + (a.ci ? ' \u00b7 CI ' + a.ci : '');
+  }
+
+  let simMetaCache = null;
+  async function loadSimMeta(force) {
+    if (!force && simMetaCache) return simMetaCache;
+    const [cfgRes, aulasRes] = await Promise.all([api('/asistencia/simulacros/config'), api('/aulas')]);
+    simMetaCache = {
+      config: cfgRes || { materias_examen: [], docente_examen_id: null, docente_examen_nombre: 'Examen' },
+      aulas: Array.isArray(aulasRes) ? aulasRes : (aulasRes && aulasRes.items ? aulasRes.items : []),
+    };
+    return simMetaCache;
+  }
+
+  async function renderSimulacroImportar() {
+    if (!contentEl) return;
+    if (!simMetaCache) {
+      contentEl.innerHTML = '<div class="nc-card"><p>Cargando...</p></div>';
+    }
+    let config = { materias_examen: [], docente_examen_id: null, docente_examen_nombre: 'Examen' };
+    let aulas = [];
+    try {
+      const meta = await loadSimMeta(false);
+      if (!isActiveSub('simulacro-importar')) return;
+      config = meta.config || config;
+      aulas = meta.aulas || [];
+    } catch (e) {
+      if (!isActiveSub('simulacro-importar')) return;
+      contentEl.innerHTML = '<div class="nc-card"><p>Error: ' + escapeHtml(e.message) + '</p></div>';
+      return;
+    }
+    const materias = Array.isArray(config.materias_examen) ? config.materias_examen : [];
+    const importState = { listas: [] };
+    const searchCache = {};
+    const searchTimers = {};
+    contentEl.innerHTML = '';
+    contentEl.appendChild(simulacroBackBtn('Simulacro'));
+    const card = el('div', { class: 'nc-card' });
+    contentEl.appendChild(card);
+    card.innerHTML = '<h3 style="margin:0 0 8px">Importar listas desde Excel</h3>'
+      + '<p style="margin:0 0 12px;font-size:13px;color:#555;line-height:1.45">El archivo puede traer varias aulas juntas. Cada lista empieza en una celda que dice <strong>AULA</strong> y el c\u00f3digo del aula f\u00edsica (AULA K, AULA I, AULA M). Debajo van los estudiantes, con el nombre completo. Se crea un simulacro por cada aula.</p>'
+      + '<div class="nc-row nc-row-wrap" style="gap:12px;margin-bottom:12px;align-items:flex-end">'
+      + '<div class="nc-field" style="min-width:240px;flex:1"><label>Tipo de examen</label>'
+      + '<select id="nc-sim-imp-materia"><option value="">Seleccione examen</option>'
+      + materias.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nombre) + '</option>').join('')
+      + '</select></div>'
+      + '<div class="nc-field" style="min-width:260px;flex:1"><label>Archivo .xlsx</label>'
+      + '<input type="file" id="nc-sim-imp-file" accept=".xlsx,.xls,.xlsm" /></div>'
+      + '<button type="button" class="nc-btn" id="nc-sim-imp-leer">Leer archivo</button></div>'
+      + '<p id="nc-sim-imp-msg" style="font-size:13px;color:#666;margin:0 0 8px">Los que coinciden quedan asignados. Si un nombre no coincide, lo vincul\u00e1s a un alumno existente o lo cre\u00e1s, solo si confirm\u00e1s que es nuevo.</p>'
+      + '<div id="nc-sim-imp-preview"></div>'
+      + '<div id="nc-sim-imp-actions" style="display:none;margin-top:16px"><button type="button" class="nc-btn" id="nc-sim-imp-commit" style="background:#2e7d32">Crear simulacros</button>'
+      + '<span id="nc-sim-imp-resumen" style="margin-left:12px;font-size:13px;color:#444"></span></div>';
+
+    function aulasDeLista(lista) {
+      const map = new Map();
+      (aulas || []).forEach(a => {
+        const code = codigoAulaFlexible(a);
+        const esFisica = getAulasFisicasFromList([a]).length > 0;
+        if (esFisica || code === String(lista.aula_codigo || '').toUpperCase()) map.set(Number(a.id), a);
+      });
+      if (lista.aula_id && !map.has(Number(lista.aula_id))) {
+        map.set(Number(lista.aula_id), { id: lista.aula_id, nombre: lista.aula_nombre || lista.aula_codigo || 'Aula' });
+      }
+      return Array.from(map.values());
+    }
+
+    function filaPendiente(row) {
+      return !row.omitir && !Number(row.alumno_id);
+    }
+
+    function renderPreview() {
+      const previewEl = card.querySelector('#nc-sim-imp-preview');
+      const actionsEl = card.querySelector('#nc-sim-imp-actions');
+      const resumenEl = card.querySelector('#nc-sim-imp-resumen');
+      if (!previewEl) return;
+      const listas = importState.listas || [];
+      if (!listas.length) {
+        previewEl.innerHTML = '';
+        if (actionsEl) actionsEl.style.display = 'none';
+        return;
+      }
+      let pendientes = 0;
+      listas.forEach(lista => { pendientes += (lista.alumnos || []).filter(filaPendiente).length; });
+      if (actionsEl) actionsEl.style.display = 'block';
+      if (resumenEl) resumenEl.textContent = listas.length + ' lista' + (listas.length === 1 ? '' : 's') + ' \u00b7 ' + (pendientes ? (pendientes + ' sin resolver') : 'todas resueltas');
+      previewEl.innerHTML = listas.map((lista, li) => {
+        const alumnos = lista.alumnos || [];
+        const ok = [];
+        const pend = [];
+        const omit = [];
+        alumnos.forEach((row, ri) => {
+          if (row.omitir) omit.push({ row: row, ri: ri });
+          else if (Number(row.alumno_id) && row.estado === 'ok') ok.push({ row: row, ri: ri });
+          else pend.push({ row: row, ri: ri });
+        });
+        const opts = aulasDeLista(lista);
+        const aulaSel = '<select data-imp-aula="' + li + '" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px">'
+          + '<option value="">Eleg\u00ed el aula</option>'
+          + opts.map(a => '<option value="' + a.id + '"' + (Number(lista.aula_id) === Number(a.id) ? ' selected' : '') + '>' + escapeHtml(etiquetaAulaImport(a)) + '</option>').join('')
+          + '</select>';
+        const avisoAula = lista.aula_id ? '' : '<div style="font-size:12px;color:#b26a00;margin-top:4px">No hay un aula \u00fanica con c\u00f3digo ' + escapeHtml(lista.aula_codigo || '') + '. Eleg\u00ed cu\u00e1l corresponde.</div>';
+        const okHtml = ok.map(x => {
+          return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #e8f5e9;align-items:center">'
+            + '<div><div>' + escapeHtml(x.row.nombre_archivo || '') + '</div><div style="font-size:12px;color:#2e7d32">Coincide con ' + escapeHtml(alumnoTxtImport(x.row.alumno)) + '</div></div>'
+            + '<span style="white-space:nowrap"><button type="button" class="nc-btn" data-imp-clear="' + li + ':' + x.ri + '" style="padding:2px 8px;font-size:12px">Cambiar</button> '
+            + '<button type="button" class="nc-btn" data-imp-omit="' + li + ':' + x.ri + '" style="padding:2px 8px;font-size:12px">Quitar</button></span></div>';
+        }).join('');
+        const pendHtml = pend.map(x => {
+          const cands = (x.row.candidatos || []).map(c =>
+            '<button type="button" class="nc-btn" data-imp-pick="' + li + ':' + x.ri + ':' + c.id + '" style="padding:3px 8px;font-size:12px;margin:0 6px 6px 0">' + escapeHtml(alumnoTxtImport(c)) + '</button>'
+          ).join('');
+          return '<div style="padding:8px;margin:8px 0;border:1px solid #f0d48a;border-radius:8px;background:#fffaf0">'
+            + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'
+            + '<div><strong>' + escapeHtml(x.row.nombre_archivo || '') + '</strong><div style="font-size:12px;color:#8a5a00;margin-top:2px">'
+            + (cands ? 'No coincide exacto. Eleg\u00ed la persona correcta o busc\u00e1.' : 'No est\u00e1 en el sistema. Busc\u00e1 por si est\u00e1 escrito distinto, o crealo solo si confirm\u00e1s que es nuevo.')
+            + '</div></div>'
+            + '<button type="button" class="nc-btn" data-imp-omit="' + li + ':' + x.ri + '" style="padding:2px 8px;font-size:12px">Quitar</button></div>'
+            + (cands ? '<div style="margin-top:8px">' + cands + '</div>' : '')
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">'
+            + '<input type="text" data-imp-search="' + li + ':' + x.ri + '" placeholder="Buscar por CI, nombre o apellido" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid #ddd;border-radius:6px" />'
+            + '<button type="button" class="nc-btn" data-imp-crear="' + li + ':' + x.ri + '" style="background:#6a1b9a">Crear alumno</button></div>'
+            + '<div data-imp-results="' + li + ':' + x.ri + '" style="margin-top:6px"></div></div>';
+        }).join('');
+        const omitHtml = omit.map(x => {
+          const nota = x.row.estado === 'repetido' ? 'Repetido en el archivo: se toma una sola vez.' : 'Quitado de esta lista.';
+          const undo = x.row.estado === 'repetido' ? '' : '<button type="button" class="nc-btn" data-imp-undo="' + li + ':' + x.ri + '" style="padding:2px 8px;font-size:12px">Incluir</button>';
+          return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:13px;color:#666"><span>' + escapeHtml(x.row.nombre_archivo || '') + ' \u2014 ' + nota + '</span>' + undo + '</div>';
+        }).join('');
+        return '<section style="margin-top:16px;padding:14px;border:1px solid #e0e0e0;border-radius:10px">'
+          + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">'
+          + '<div><h4 style="margin:0 0 4px">Aula ' + escapeHtml(lista.aula_codigo || '') + '</h4>'
+          + '<div style="font-size:13px;color:#555">' + (lista.fecha ? ('Fecha del archivo: ' + escapeHtml(lista.fecha) + ' \u00b7 ') : '')
+          + ok.length + ' coinciden \u00b7 ' + pend.length + ' sin resolver' + (omit.length ? (' \u00b7 ' + omit.length + ' fuera') : '') + '</div>'
+          + avisoAula + '</div>'
+          + '<div class="nc-field" style="min-width:180px"><label>Aula f\u00edsica</label>' + aulaSel + '</div></div>'
+          + (pendHtml ? '<div style="margin-top:12px">' + pendHtml + '</div>' : '<p style="margin:12px 0 0;color:#2e7d32;font-size:13px">Todos los nombres de esta aula coinciden.</p>')
+          + '<div style="margin-top:10px"><button type="button" class="nc-btn" data-imp-toggle="' + li + '" style="background:#fff;color:#333;border:1px solid #ccc;padding:4px 10px;font-size:12px">'
+          + (lista._ver ? 'Ocultar coincidencias' : ('Ver ' + ok.length + ' coincidencias')) + '</button>'
+          + (lista._ver ? '<div style="margin-top:8px">' + (okHtml || '<p style="color:#888;font-size:13px">Sin coincidencias autom\u00e1ticas.</p>') + '</div>' : '')
+          + '</div>'
+          + (omitHtml ? '<div style="margin-top:8px">' + omitHtml + '</div>' : '')
+          + '</section>';
+      }).join('');
+    }
+
+    function findAlumnoEnFila(lista, id) {
+      const n = Number(id);
+      for (let i = 0; i < (lista.alumnos || []).length; i++) {
+        const row = lista.alumnos[i];
+        if (row.alumno && Number(row.alumno.id) === n) return row.alumno;
+        const c = (row.candidatos || []).find(x => Number(x.id) === n);
+        if (c) return c;
+      }
+      const cached = searchCache;
+      const keys = Object.keys(cached);
+      for (let k = 0; k < keys.length; k++) {
+        const hit = (cached[keys[k]] || []).find(x => Number(x.id) === n);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    function assignRow(lista, row, alumno) {
+      if (!alumno || !alumno.id) return;
+      const id = Number(alumno.id);
+      const other = (lista.alumnos || []).find(r => r !== row && !r.omitir && Number(r.alumno_id) === id);
+      if (other) {
+        alert('Ese alumno ya est\u00e1 en esta lista (' + alumnoTxtImport(other.alumno || alumno) + ').');
+        return;
+      }
+      row.alumno_id = id;
+      row.alumno = {
+        id: id,
+        nombres: alumno.nombres || '',
+        apellidos: alumno.apellidos || '',
+        ci: alumno.ci || '',
+      };
+      row.estado = 'ok';
+      row.omitir = false;
+      renderPreview();
+    }
+
+    function abrirCrear(lista, row) {
+      const overlay = el('div', { class: 'nc-modal-overlay' });
+      overlay.innerHTML = '<div class="nc-modal" style="max-width:480px;width:100%;background:#fff;border-radius:8px;padding:20px">'
+        + '<h4 style="margin:0 0 8px">Crear alumno</h4>'
+        + '<p style="margin:0 0 12px;font-size:13px;color:#555">Este nombre no qued\u00f3 asignado. Se da de alta en el sistema solo si confirm\u00e1s que no existe.</p>'
+        + '<div class="nc-field" style="margin-bottom:8px"><label>Apellidos</label><input id="nc-sim-new-ape" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px" value="' + escapeHtml(row.apellidos || '') + '" /></div>'
+        + '<div class="nc-field" style="margin-bottom:8px"><label>Nombres</label><input id="nc-sim-new-nom" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px" value="' + escapeHtml(row.nombres || '') + '" /></div>'
+        + '<div class="nc-field" style="margin-bottom:12px"><label>CI</label><input id="nc-sim-new-ci" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px" placeholder="Obligatorio" /></div>'
+        + '<div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" class="nc-btn" id="nc-sim-new-cancel" style="background:#fff;color:#333;border:1px solid #ccc">Cancelar</button>'
+        + '<button type="button" class="nc-btn" id="nc-sim-new-ok" style="background:#6a1b9a">Crear alumno</button></div></div>';
+      const close = () => overlay.remove();
+      overlay.onclick = (e) => { if (e.target === overlay) close(); };
+      overlay.querySelector('#nc-sim-new-cancel').onclick = close;
+      const btnOk = overlay.querySelector('#nc-sim-new-ok');
+      btnOk.onclick = withButtonLock(btnOk, async () => {
+        const apellidos = overlay.querySelector('#nc-sim-new-ape').value.trim();
+        const nombres = overlay.querySelector('#nc-sim-new-nom').value.trim();
+        const ci = overlay.querySelector('#nc-sim-new-ci').value.trim();
+        if (!apellidos || !nombres || !ci) {
+          alert('Apellidos, nombres y CI son obligatorios.');
+          return;
+        }
+        if (!confirm('\u00bfCrear a ' + apellidos + ', ' + nombres + ' (CI ' + ci + ') como alumno nuevo?')) return;
+        try {
+          const busq = await api('/alumnos?search=' + encodeURIComponent(ci) + '&order_by=apellidos&order=ASC');
+          const items = (busq && busq.items) ? busq.items : (Array.isArray(busq) ? busq : []);
+          const ya = items.find(a => String(a.ci || '').replace(/\s+/g, '') === ci.replace(/\s+/g, ''));
+          if (ya) {
+            if (confirm('Ese CI ya existe: ' + alumnoTxtImport(ya) + '. \u00bfUsar ese alumno en lugar de crear otro?')) {
+              assignRow(lista, row, ya);
+              close();
+            }
+            return;
+          }
+          const creado = await api('/alumnos', {
+            method: 'POST',
+            body: JSON.stringify({ nombres: nombres, apellidos: apellidos, ci: ci }),
+          });
+          assignRow(lista, row, creado);
+          close();
+        } catch (err) {
+          alert('No se pudo crear: ' + (err && err.message ? err.message : err));
+        }
+      }, { loadingText: 'Creando...' });
+      document.body.appendChild(overlay);
+      const ciInp = overlay.querySelector('#nc-sim-new-ci');
+      if (ciInp) ciInp.focus();
+    }
+
+    const previewEl = card.querySelector('#nc-sim-imp-preview');
+    previewEl.addEventListener('click', (ev) => {
+      const t = ev.target.closest('button');
+      if (!t) return;
+      const listas = importState.listas || [];
+      if (t.hasAttribute('data-imp-toggle')) {
+        const li = Number(t.getAttribute('data-imp-toggle'));
+        if (listas[li]) listas[li]._ver = !listas[li]._ver;
+        renderPreview();
+        return;
+      }
+      const omit = t.getAttribute('data-imp-omit');
+      const undo = t.getAttribute('data-imp-undo');
+      const clear = t.getAttribute('data-imp-clear');
+      const pick = t.getAttribute('data-imp-pick');
+      const use = t.getAttribute('data-imp-use');
+      const crear = t.getAttribute('data-imp-crear');
+      function pair(attr) {
+        const p = String(attr || '').split(':');
+        return { li: Number(p[0]), ri: Number(p[1]), id: Number(p[2] || 0) };
+      }
+      if (omit) {
+        const p = pair(omit);
+        const row = listas[p.li] && listas[p.li].alumnos[p.ri];
+        if (row) { row.omitir = true; renderPreview(); }
+        return;
+      }
+      if (undo) {
+        const p = pair(undo);
+        const row = listas[p.li] && listas[p.li].alumnos[p.ri];
+        if (row && row.estado !== 'repetido') { row.omitir = false; renderPreview(); }
+        return;
+      }
+      if (clear) {
+        const p = pair(clear);
+        const row = listas[p.li] && listas[p.li].alumnos[p.ri];
+        if (row) {
+          row.alumno_id = 0;
+          row.alumno = null;
+          row.estado = (row.candidatos && row.candidatos.length) ? 'revisar' : 'nuevo';
+          renderPreview();
+        }
+        return;
+      }
+      if (pick || use) {
+        const p = pair(pick || use);
+        const lista = listas[p.li];
+        const row = lista && lista.alumnos[p.ri];
+        const alumno = lista && row ? findAlumnoEnFila(lista, p.id) : null;
+        if (row && alumno) assignRow(lista, row, alumno);
+        return;
+      }
+      if (crear) {
+        const p = pair(crear);
+        const lista = listas[p.li];
+        const row = lista && lista.alumnos[p.ri];
+        if (lista && row) abrirCrear(lista, row);
+      }
+    });
+    previewEl.addEventListener('input', (ev) => {
+      const inp = ev.target;
+      if (!inp || !inp.getAttribute || !inp.hasAttribute('data-imp-search')) return;
+      const key = inp.getAttribute('data-imp-search');
+      const box = previewEl.querySelector('[data-imp-results="' + key + '"]');
+      if (!box) return;
+      const q = inp.value.trim();
+      if (searchTimers[key]) clearTimeout(searchTimers[key]);
+      if (q.length < 2) {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = '<p style="margin:4px 0;font-size:12px;color:#888">Buscando...</p>';
+      searchTimers[key] = setTimeout(async () => {
+        try {
+          const res = await api('/alumnos?search=' + encodeURIComponent(q) + '&order_by=apellidos&order=ASC');
+          const items = (res && res.items) ? res.items : (Array.isArray(res) ? res : []);
+          searchCache[key] = items;
+          if (!items.length) {
+            box.innerHTML = '<p style="margin:4px 0;font-size:12px;color:#888">Sin resultados.</p>';
+            return;
+          }
+          const parts = key.split(':');
+          box.innerHTML = items.slice(0, 8).map(a =>
+            '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #eee">'
+            + '<span style="font-size:13px">' + escapeHtml(alumnoTxtImport(a)) + '</span>'
+            + '<button type="button" class="nc-btn" data-imp-use="' + parts[0] + ':' + parts[1] + ':' + a.id + '" style="padding:2px 8px;font-size:12px">Usar</button></div>'
+          ).join('');
+        } catch (err) {
+          box.innerHTML = '<p style="margin:4px 0;font-size:12px;color:#b00">' + escapeHtml(err && err.message ? err.message : 'Error') + '</p>';
+        }
+      }, 350);
+    });
+    previewEl.addEventListener('change', (ev) => {
+      const sel = ev.target;
+      if (!sel || !sel.hasAttribute || !sel.hasAttribute('data-imp-aula')) return;
+      const li = Number(sel.getAttribute('data-imp-aula'));
+      const lista = importState.listas[li];
+      if (!lista) return;
+      lista.aula_id = Number(sel.value || 0);
+      const elegida = aulasDeLista(lista).find(a => Number(a.id) === Number(lista.aula_id));
+      if (elegida) lista.aula_nombre = elegida.nombre || '';
+      renderPreview();
+    });
+
+    const btnLeer = card.querySelector('#nc-sim-imp-leer');
+    if (btnLeer) {
+      btnLeer.addEventListener('click', withButtonLock(btnLeer, async () => {
+        const fileInp = card.querySelector('#nc-sim-imp-file');
+        const file = fileInp && fileInp.files && fileInp.files[0];
+        if (!file) { alert('Eleg\u00ed un archivo Excel.'); return; }
+        const fd = new FormData();
+        fd.append('excel', file);
+        const msg = card.querySelector('#nc-sim-imp-msg');
+        if (msg) msg.textContent = 'Leyendo el archivo y comparando nombres...';
+        try {
+          const data = await api('/asistencia/simulacros/importar', { method: 'POST', body: fd });
+          importState.listas = (data && data.listas) ? data.listas : [];
+          importState.listas.forEach(lista => { lista._ver = false; });
+          if (!importState.listas.length) {
+            alert('El archivo no tiene listas con cabecera AULA.');
+          }
+          renderPreview();
+          if (msg) msg.textContent = 'Revis\u00e1 las aulas y los nombres que no coincidieron antes de crear los simulacros.';
+        } catch (err) {
+          if (msg) msg.textContent = 'No se pudo leer el archivo.';
+          alert('Error: ' + (err && err.message ? err.message : err));
+        }
+      }, { loadingText: 'Leyendo...' }));
+    }
+
+    const btnCommit = card.querySelector('#nc-sim-imp-commit');
+    if (btnCommit) {
+      btnCommit.addEventListener('click', withButtonLock(btnCommit, async () => {
+        const materiaId = Number((card.querySelector('#nc-sim-imp-materia') || {}).value || 0);
+        if (!materiaId) { alert('Seleccion\u00e1 el tipo de examen.'); return; }
+        if (!config.docente_examen_id) { alert('No est\u00e1 configurado el docente Examen.'); return; }
+        const listas = importState.listas || [];
+        if (!listas.length) { alert('Primero le\u00e9 un archivo.'); return; }
+        const materiaOpt = (card.querySelector('#nc-sim-imp-materia') || {}).selectedOptions;
+        const materiaNombre = materiaOpt && materiaOpt[0] ? materiaOpt[0].textContent.trim() : 'Simulacro';
+        for (let i = 0; i < listas.length; i++) {
+          const lista = listas[i];
+          const etiqueta = 'Aula ' + (lista.aula_codigo || (i + 1));
+          if (!Number(lista.aula_id)) { alert(etiqueta + ': eleg\u00ed el aula f\u00edsica.'); return; }
+          const pend = (lista.alumnos || []).filter(filaPendiente);
+          if (pend.length) {
+            alert(etiqueta + ': quedan ' + pend.length + ' nombres sin coincidencia. Asignalos, cre\u00e1 el alumno o quitalos de la lista.');
+            return;
+          }
+          const ids = (lista.alumnos || []).filter(r => !r.omitir && Number(r.alumno_id)).map(r => Number(r.alumno_id));
+          if (!ids.length) { alert(etiqueta + ' qued\u00f3 sin alumnos.'); return; }
+        }
+        if (!confirm('\u00bfCrear ' + listas.length + ' simulacro' + (listas.length === 1 ? '' : 's') + ' con estas listas?')) return;
+        const creados = [];
+        try {
+          for (let i = 0; i < listas.length; i++) {
+            const lista = listas[i];
+            const ids = Array.from(new Set((lista.alumnos || []).filter(r => !r.omitir && Number(r.alumno_id)).map(r => Number(r.alumno_id))));
+            const nombre = [materiaNombre, 'Aula ' + (lista.aula_codigo || ''), lista.fecha || ''].filter(Boolean).join(' \u2014 ').slice(0, 180);
+            const res = await api('/asistencia/simulacros', {
+              method: 'POST',
+              body: JSON.stringify({
+                materia_id: materiaId,
+                aula_id: Number(lista.aula_id),
+                alumno_ids: ids,
+                nombre: nombre,
+              }),
+            });
+            creados.push((res && res.nombre) ? res.nombre : nombre);
+          }
+        } catch (err) {
+          const hecho = creados.length ? (' Se alcanzaron a crear: ' + creados.join('; ') + '.') : '';
+          alert('Error al crear: ' + (err && err.message ? err.message : err) + hecho);
+          if (creados.length) {
+            setActiveSub('simulacro-lista');
+            renderSimulacroLista();
+          }
+          return;
+        }
+        alert('Listo. Se crearon ' + creados.length + ' simulacro' + (creados.length === 1 ? '' : 's') + ':\n' + creados.join('\n') + '\n\nAl llamar lista, todos entran como presentes.');
+        setActiveSub('simulacro-lista');
+        renderSimulacroLista();
+      }, { loadingText: 'Creando...' }));
+    }
   }
 
   async function renderSimulacroCrear() {
     if (!contentEl) return;
-    contentEl.innerHTML = '<div class="nc-card"><p>Cargando...</p></div>';
+    if (!simMetaCache) contentEl.innerHTML = '<div class="nc-card"><p>Cargando...</p></div>';
     let config = { materias_examen: [], docente_examen_id: null, docente_examen_nombre: 'Examen' };
     let aulas = [];
     try {
-      const [cfgRes, aulasRes] = await Promise.all([api('/asistencia/simulacros/config'), api('/aulas')]);
-      config = cfgRes || config;
-      aulas = Array.isArray(aulasRes) ? aulasRes : (aulasRes && aulasRes.items ? aulasRes.items : []);
+      const meta = await loadSimMeta(false);
+      if (!isActiveSub('simulacro-crear')) return;
+      config = meta.config || config;
+      aulas = meta.aulas || [];
     } catch (e) {
+      if (!isActiveSub('simulacro-crear')) return;
       contentEl.innerHTML = '<div class="nc-card"><p>Error: ' + escapeHtml(e.message) + '</p></div>';
       return;
     }
@@ -4449,7 +4915,8 @@
     contentEl.appendChild(simulacroBackBtn('Simulacro'));
     const card = el('div', { class: 'nc-card' });
     contentEl.appendChild(card);
-    card.innerHTML = '<h3 style="margin:0 0 14px">Crear simulacro</h3>'
+    card.innerHTML = '<h3 style="margin:0 0 8px">Crear simulacro</h3>'
+      + '<p style="margin:0 0 14px"><button type="button" class="nc-btn" id="nc-sim-ir-importar" style="background:#fff;color:#333;border:1px solid #ccc;padding:4px 10px;font-size:12px">Importar varias aulas desde Excel</button></p>'
       + '<div class="nc-row nc-row-wrap" style="gap:12px;margin-bottom:16px">'
       + '<div class="nc-field" style="min-width:260px;flex:1"><label>Tipo de examen</label>'
       + '<select id="nc-sim-materia"><option value="">Seleccione examen</option>'
@@ -4473,6 +4940,8 @@
       const msgEl = card.querySelector('#nc-sim-crear-msg');
       if (msgEl) msgEl.innerHTML = '<span style="color:#b00">No se encontr\u00f3 el docente "Examen". Contacte al administrador.</span>';
     }
+    const irImportar = card.querySelector('#nc-sim-ir-importar');
+    if (irImportar) irImportar.onclick = () => { renderSub('simulacro-importar'); };
     const resultadosEl = card.querySelector('#nc-sim-resultados');
     const seleccionadosEl = card.querySelector('#nc-sim-seleccionados');
     const countEl = card.querySelector('#nc-sim-count');
@@ -4541,27 +5010,42 @@
         if (!confirm('\u00bfCrear el simulacro con ' + alumnoIds.length + ' alumno(s)?')) return;
         try {
           const res = await api('/asistencia/simulacros', { method: 'POST', body: JSON.stringify({ materia_id: materiaId, aula_id: aulaId, alumno_ids: alumnoIds }) });
-          alert('Simulacro creado: ' + (res.nombre || 'OK') + ' (' + (res.total_alumnos || alumnoIds.length) + ' alumnos).');
+          alert('Simulacro creado: ' + (res.nombre || 'OK') + ' (' + (res.total_alumnos || alumnoIds.length) + ' alumnos). Todos figuran como presentes: quitá el presente a quienes no asistieron y guardá la asistencia.');
           setActiveSub('simulacro-lista');
-          renderSimulacroLista();
+          renderSimulacroLista(res && res.id ? res.id : '');
         } catch (e) { alert('Error: ' + e.message); }
       }, { loadingText: 'Creando...' }));
     }
   }
 
-  async function renderSimulacroLista() {
+  function simItemPresente(prev) {
+    return { asistio: true, observacion: (prev && prev.observacion) ? prev.observacion : '' };
+  }
+
+  async function renderSimulacroLista(preselectId) {
     if (!contentEl) return;
     contentEl.innerHTML = '<div class="nc-card"><p>Cargando...</p></div>';
     let simulacros = [];
     try {
       const res = await api('/asistencia/simulacros');
+      if (!isActiveSub('simulacro-lista')) return;
       simulacros = (res && res.items) ? res.items : [];
     } catch (e) {
+      if (!isActiveSub('simulacro-lista')) return;
       contentEl.innerHTML = '<div class="nc-card"><p>Error: ' + escapeHtml(e.message) + '</p></div>';
       return;
     }
     const today = localDateYMD(new Date());
-    const simState = { simulacro_id: '', fecha: today, alumnos: [], items: {}, sortBy: 'apellido', simulacro: null };
+    const simState = {
+      simulacro_id: '',
+      fecha: today,
+      bloque: '',
+      bloquesTomados: { 1: false, 2: false },
+      alumnos: [],
+      items: {},
+      sortBy: 'apellido',
+      simulacro: null,
+    };
     contentEl.innerHTML = '';
     contentEl.appendChild(simulacroBackBtn('Simulacro'));
     const card = el('div', { class: 'nc-card' });
@@ -4573,7 +5057,13 @@
       + '<select id="nc-sim-lista-sel"><option value="">Seleccione un simulacro</option>'
       + simulacros.map(s => '<option value="' + s.id + '">' + escapeHtml(s.nombre) + ' (' + (s.total_alumnos || 0) + ' alumnos)</option>').join('')
       + '</select></div>'
-      + '<div class="nc-field"><label>Fecha</label><input type="date" id="nc-sim-lista-fecha" value="' + today + '" /></div></div>'
+      + '<div class="nc-field"><label>Fecha</label><input type="date" id="nc-sim-lista-fecha" value="' + today + '" /></div>'
+      + '<div class="nc-field"><label>Bloque <span style="color:#b91c1c">*</span></label>'
+      + '<select id="nc-sim-lista-bloque" required>'
+      + '<option value="" selected>Seleccione el bloque</option>'
+      + '<option value="1">Bloque 1</option>'
+      + '<option value="2">Bloque 2</option></select></div></div>'
+      + '<div id="nc-sim-lista-bloque-hint" style="display:none;margin:-4px 0 12px;font-size:13px;color:#9a3412"></div>'
       + '<div id="nc-sim-lista-meta" style="display:none;margin-bottom:12px;padding:12px;background:#f5f7ff;border-radius:8px;font-size:14px"></div>'
       + '<div id="nc-sim-lista-wrap" style="display:none">'
       + '<div class="nc-row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">'
@@ -4583,14 +5073,128 @@
       + '<span id="nc-sim-lista-contador" style="font-weight:600;margin-left:auto"></span></div>'
       + '<div style="overflow:auto"><table class="nc-table"><thead><tr><th>Nombre</th><th>Apellido</th><th>Asisti\u00f3</th><th>Observaci\u00f3n</th></tr></thead>'
       + '<tbody id="nc-sim-lista-tbody"></tbody></table></div>'
-      + '<div class="nc-row" style="margin-top:16px"><button type="button" class="nc-btn" id="nc-sim-lista-guardar">Guardar asistencia (llamar lista)</button></div></div>'
-      + '<p id="nc-sim-lista-msg" style="opacity:.8">Seleccione un simulacro para cargar la lista y llamar asistencia.</p>';
+      + '<div class="nc-row" style="margin-top:16px;gap:8px;flex-wrap:wrap;align-items:center">'
+      + '<button type="button" class="nc-btn" id="nc-sim-lista-guardar">Guardar asistencia (llamar lista)</button>'
+      + '<button type="button" class="nc-btn" id="nc-sim-lista-ir-mias" style="display:none;background:#fff;color:#333;border:1px solid #ccc">Ir a Mis asistencias</button></div></div>'
+      + '<p id="nc-sim-lista-msg" style="opacity:.8">Seleccione un simulacro y el bloque (1 o 2). Los alumnos entran como presentes: quitá el presente a quienes no asistieron y guardá.</p>';
     const sel = card.querySelector('#nc-sim-lista-sel');
     const meta = card.querySelector('#nc-sim-lista-meta');
     const wrap = card.querySelector('#nc-sim-lista-wrap');
     const msg = card.querySelector('#nc-sim-lista-msg');
     const tbody = card.querySelector('#nc-sim-lista-tbody');
     const fechaInp = card.querySelector('#nc-sim-lista-fecha');
+    const bloqueSel = card.querySelector('#nc-sim-lista-bloque');
+    const bloqueHint = card.querySelector('#nc-sim-lista-bloque-hint');
+    const btnIrMias = card.querySelector('#nc-sim-lista-ir-mias');
+    function bloqueTomadoMsg(bloque) {
+      return 'El Bloque ' + bloque + ' de este simulacro ya est\u00e1 registrado para esa fecha. No se puede volver a cargar. '
+        + 'And\u00e1 a Mis asistencias registradas para editarlo, o pedile a un administrador que lo modifique.';
+    }
+    function refreshBloqueSelectOptions() {
+      if (!bloqueSel) return;
+      const cur = String(simState.bloque || '');
+      const opt1 = bloqueSel.querySelector('option[value="1"]');
+      const opt2 = bloqueSel.querySelector('option[value="2"]');
+      if (opt1) {
+        opt1.disabled = !!simState.bloquesTomados[1];
+        opt1.textContent = simState.bloquesTomados[1] ? 'Bloque 1 (ya registrado)' : 'Bloque 1';
+      }
+      if (opt2) {
+        opt2.disabled = !!simState.bloquesTomados[2];
+        opt2.textContent = simState.bloquesTomados[2] ? 'Bloque 2 (ya registrado)' : 'Bloque 2';
+      }
+      if (cur === '1' && simState.bloquesTomados[1]) simState.bloque = '';
+      if (cur === '2' && simState.bloquesTomados[2]) simState.bloque = '';
+      bloqueSel.value = String(simState.bloque || '');
+      let hint = '';
+      if (simState.bloquesTomados[1] || simState.bloquesTomados[2]) {
+        const tomados = [];
+        if (simState.bloquesTomados[1]) tomados.push('Bloque 1');
+        if (simState.bloquesTomados[2]) tomados.push('Bloque 2');
+        hint = tomados.join(' y ') + ' ya registrado'
+          + (tomados.length > 1 ? 's' : '')
+          + ' para esta fecha. Para corregir, us\u00e1 Mis asistencias registradas o pedile a un administrador.';
+      }
+      if (bloqueHint) {
+        bloqueHint.style.display = hint ? 'block' : 'none';
+        bloqueHint.textContent = hint;
+      }
+      if (btnIrMias) {
+        btnIrMias.style.display = (simState.bloquesTomados[1] || simState.bloquesTomados[2]) ? 'inline-flex' : 'none';
+      }
+      updateSimListaMeta();
+    }
+    async function loadBloquesTomados() {
+      const sid = Number(simState.simulacro_id || 0);
+      const fecha = (fechaInp && fechaInp.value) ? fechaInp.value : simState.fecha;
+      simState.bloquesTomados = { 1: false, 2: false };
+      if (!sid || !fecha) {
+        refreshBloqueSelectOptions();
+        return;
+      }
+      try {
+        const res = await api('/asistencia/sesiones?fecha_desde=' + encodeURIComponent(fecha)
+          + '&fecha_hasta=' + encodeURIComponent(fecha));
+        const items = (res && res.items) ? res.items : [];
+        items.forEach(it => {
+          if (Number(it.simulacro_id || 0) !== sid) return;
+          let b = Number(it.bloque || 0);
+          if (b !== 1 && b !== 2) {
+            const obs = String(it.observacion_general || '');
+            const m = obs.match(/(?:^|\n)\s*Bloque\s*([12])\b/i) || obs.match(/\[NC_SIM_BLOQUE:([12])\]/i);
+            b = m ? Number(m[1]) : 1;
+          }
+          if (b === 1 || b === 2) simState.bloquesTomados[b] = true;
+        });
+      } catch (_) { /* si falla, el backend igual bloquea duplicados */ }
+      refreshBloqueSelectOptions();
+    }
+    function updateSimListaMeta() {
+      const data = simState.simulacro;
+      if (!meta || !data) return;
+      const bloque = Number(simState.bloque);
+      const bloqueLabel = (bloque === 1 || bloque === 2)
+        ? ('Bloque ' + bloque)
+        : 'Sin bloque seleccionado';
+      meta.style.display = 'block';
+      meta.innerHTML = '<strong>' + escapeHtml(data.nombre || '') + '</strong>'
+        + ' <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:'
+        + ((bloque === 1 || bloque === 2) ? '#1e3a8a' : '#92400e')
+        + ';color:#fff;font-size:12px;font-weight:600">' + bloqueLabel + '</span>'
+        + '<br/><span style="color:#555">Examen: '
+        + escapeHtml(data.materia_nombre || '') + ' \u00b7 Aula: ' + escapeHtml(aulaFisicaCode({ nombre: data.aula_nombre }))
+        + ' \u00b7 Docente: ' + escapeHtml(data.docente_nombre || 'Examen')
+        + ((bloque === 1 || bloque === 2) ? (' \u00b7 Registrando ' + bloqueLabel) : ' \u00b7 Elegí el bloque obligatorio') + '</span>';
+    }
+    function resetListaPresentes() {
+      simState.alumnos.forEach(a => { simState.items[a.id] = simItemPresente(); });
+      renderSimListaTable();
+    }
+    function setBloque(n, opts) {
+      const allowTaken = !!(opts && opts.allowTaken);
+      if (n === '' || n == null) {
+        simState.bloque = '';
+        if (bloqueSel) bloqueSel.value = '';
+        updateSimListaMeta();
+        return true;
+      }
+      const bloque = Number(n) === 2 ? 2 : (Number(n) === 1 ? 1 : 0);
+      if (bloque !== 1 && bloque !== 2) {
+        simState.bloque = '';
+        if (bloqueSel) bloqueSel.value = '';
+        updateSimListaMeta();
+        return false;
+      }
+      if (!allowTaken && simState.bloquesTomados[bloque]) {
+        alert(bloqueTomadoMsg(bloque));
+        if (bloqueSel) bloqueSel.value = String(simState.bloque || '');
+        return false;
+      }
+      simState.bloque = bloque;
+      if (bloqueSel) bloqueSel.value = String(bloque);
+      updateSimListaMeta();
+      return true;
+    }
     function renderSimListaTable() {
       if (!tbody) return;
       const search = ((card.querySelector('#nc-sim-lista-buscar') || {}).value || '').toLowerCase().trim();
@@ -4605,24 +5209,30 @@
       const cont = card.querySelector('#nc-sim-lista-contador');
       if (cont) cont.textContent = filtered.filter(a => (simState.items[a.id] || {}).asistio !== false).length + '/' + filtered.length + ' presentes';
       tbody.innerHTML = filtered.map(a => {
-        const st = simState.items[a.id] || { asistio: false, observacion: '' };
+        const st = simState.items[a.id] || simItemPresente();
         const activo = st.asistio !== false;
+        const toggleId = 'nc-sim-toggle-' + a.id;
         return '<tr data-alumno-id="' + a.id + '"><td>' + escapeHtml(a.nombres || '') + '</td><td>' + escapeHtml(a.apellidos || '') + '</td>'
-          + '<td class="nc-asis-acciones"><button type="button" class="nc-asis-btn-asistio ' + (activo ? 'activo' : '') + '" data-toggle-asistio="' + a.id + '" title="Marcar asistencia">\u2713</button></td>'
+          + '<td class="nc-asis-acciones" style="text-align:center">'
+          + '<label class="nc-toggle-switch" title="' + (activo ? 'Presente' : 'Ausente') + '">'
+          + '<input type="checkbox" id="' + toggleId + '" data-sim-asistio="' + a.id + '"' + (activo ? ' checked' : '') + ' />'
+          + '<span class="nc-toggle-slider"></span></label></td>'
           + '<td><input type="text" data-obs="' + a.id + '" value="' + escapeHtml(st.observacion || '') + '" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px" placeholder="Observaci\u00f3n" /></td></tr>';
       }).join('');
-      tbody.querySelectorAll('[data-toggle-asistio]').forEach(btn => {
-        btn.onclick = () => {
-          const aid = Number(btn.getAttribute('data-toggle-asistio'));
-          if (!simState.items[aid]) simState.items[aid] = { asistio: false, observacion: '' };
-          simState.items[aid].asistio = !simState.items[aid].asistio;
-          renderSimListaTable();
+      tbody.querySelectorAll('input[type="checkbox"][data-sim-asistio]').forEach(toggle => {
+        toggle.onchange = function () {
+          const aid = Number(toggle.getAttribute('data-sim-asistio'));
+          if (!simState.items[aid]) simState.items[aid] = simItemPresente();
+          simState.items[aid].asistio = !!toggle.checked;
+          const label = toggle.closest('label');
+          if (label) label.title = toggle.checked ? 'Presente' : 'Ausente';
+          if (cont) cont.textContent = filtered.filter(a => (simState.items[a.id] || {}).asistio !== false).length + '/' + filtered.length + ' presentes';
         };
       });
       tbody.querySelectorAll('[data-obs]').forEach(inp => {
         inp.onchange = inp.oninput = () => {
           const aid = Number(inp.getAttribute('data-obs'));
-          if (!simState.items[aid]) simState.items[aid] = { asistio: false, observacion: '' };
+          if (!simState.items[aid]) simState.items[aid] = simItemPresente();
           simState.items[aid].observacion = inp.value.trim();
         };
       });
@@ -4631,7 +5241,12 @@
       if (!id) {
         if (wrap) wrap.style.display = 'none';
         if (meta) meta.style.display = 'none';
-        if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione un simulacro para cargar la lista y llamar asistencia.'; }
+        simState.simulacro = null;
+        simState.simulacro_id = '';
+        simState.bloquesTomados = { 1: false, 2: false };
+        setBloque('');
+        refreshBloqueSelectOptions();
+        if (msg) { msg.style.display = 'block'; msg.textContent = 'Seleccione un simulacro y el bloque (1 o 2). Los alumnos entran como presentes: quitá el presente a quienes no asistieron y guardá.'; }
         return;
       }
       if (msg) msg.style.display = 'none';
@@ -4641,13 +5256,9 @@
         simState.simulacro_id = id;
         simState.alumnos = Array.isArray(data.alumnos) ? data.alumnos : [];
         simState.items = {};
-        simState.alumnos.forEach(a => { simState.items[a.id] = { asistio: false, observacion: '' }; });
-        if (meta) {
-          meta.style.display = 'block';
-          meta.innerHTML = '<strong>' + escapeHtml(data.nombre || '') + '</strong><br/><span style="color:#555">Examen: '
-            + escapeHtml(data.materia_nombre || '') + ' \u00b7 Aula: ' + escapeHtml(aulaFisicaCode({ nombre: data.aula_nombre }))
-            + ' \u00b7 Docente: ' + escapeHtml(data.docente_nombre || 'Examen') + '</span>';
-        }
+        simState.alumnos.forEach(a => { simState.items[a.id] = simItemPresente(); });
+        setBloque('');
+        await loadBloquesTomados();
         if (wrap) wrap.style.display = 'block';
         renderSimListaTable();
       } catch (e) {
@@ -4656,7 +5267,20 @@
       }
     }
     if (sel) sel.addEventListener('change', () => loadSimulacro(sel.value));
-    if (fechaInp) fechaInp.addEventListener('change', () => { simState.fecha = fechaInp.value; });
+    if (fechaInp) fechaInp.addEventListener('change', async () => {
+      simState.fecha = fechaInp.value;
+      setBloque('');
+      await loadBloquesTomados();
+    });
+    if (bloqueSel) bloqueSel.addEventListener('change', () => {
+      if (!setBloque(bloqueSel.value)) return;
+    });
+    if (btnIrMias) {
+      btnIrMias.addEventListener('click', () => {
+        setActiveSub('mis-asistencias');
+        renderSub('mis-asistencias');
+      });
+    }
     const buscarLista = card.querySelector('#nc-sim-lista-buscar');
     if (buscarLista) buscarLista.addEventListener('input', renderSimListaTable);
     const ordenLista = card.querySelector('#nc-sim-lista-orden');
@@ -4671,7 +5295,17 @@
         if (!sim || !simState.alumnos.length) { alert('Seleccione un simulacro con alumnos.'); return; }
         const fecha = (fechaInp && fechaInp.value) ? fechaInp.value : simState.fecha;
         if (!fecha) { alert('Seleccione la fecha.'); return; }
-        if (!confirm('\u00bfGuardar la asistencia de este simulacro?')) return;
+        const bloque = Number(simState.bloque);
+        if (bloque !== 1 && bloque !== 2) {
+          alert('Seleccioná el bloque (1 o 2). Es obligatorio.');
+          if (bloqueSel) bloqueSel.focus();
+          return;
+        }
+        if (simState.bloquesTomados[bloque]) {
+          alert(bloqueTomadoMsg(bloque));
+          return;
+        }
+        if (!confirm('\u00bfGuardar la asistencia del Bloque ' + bloque + '?')) return;
         const items = simState.alumnos.map(a => ({
           alumno_id: a.id,
           asistio: (simState.items[a.id] || {}).asistio !== false ? 1 : 0,
@@ -4686,16 +5320,39 @@
               aula_id: Number(sim.aula_id),
               docente_encargado_id: Number(sim.docente_encargado_id),
               simulacro_id: Number(sim.id || simState.simulacro_id || 0),
+              bloque,
               items,
             }),
           });
-          alert('Asistencia guardada correctamente.');
-          simState.alumnos.forEach(a => { simState.items[a.id] = { asistio: false, observacion: '' }; });
-          renderSimListaTable();
-        } catch (e) { alert('Error al guardar: ' + e.message); }
+          simState.bloquesTomados[bloque] = true;
+          resetListaPresentes();
+          if (bloque === 1 && !simState.bloquesTomados[2]) {
+            const pasar = confirm('Bloque 1 guardado. \u00bfPasar a Bloque 2 ahora? (misma lista; perillas de nuevo en presente)');
+            if (pasar) {
+              setBloque(2);
+              refreshBloqueSelectOptions();
+              alert('Listo para Bloque 2. Marcá ausentes y guardá de nuevo.');
+            } else {
+              setBloque('');
+              refreshBloqueSelectOptions();
+              alert('Asistencia del Bloque 1 guardada. Para corregirla us\u00e1 Mis asistencias registradas.');
+            }
+          } else {
+            setBloque('');
+            refreshBloqueSelectOptions();
+            alert('Asistencia del Bloque ' + bloque + ' guardada. Para corregirla us\u00e1 Mis asistencias registradas o pedile a un administrador.');
+          }
+        } catch (e) {
+          alert('Error al guardar: ' + e.message);
+          await loadBloquesTomados();
+        }
       }, { loadingText: 'Guardando...' }));
     }
     if (!simulacros.length && msg) msg.textContent = 'No hay simulacros creados. Us\u00e1 "Crear simulacro" primero.';
+    if (preselectId && sel) {
+      sel.value = String(preselectId);
+      if (sel.value) loadSimulacro(sel.value);
+    }
   }
 
 
@@ -4712,5 +5369,5 @@
     },
   });
 
-  window.NC_Asistencia = { render, openEditarSesionModal, openModalAlumno };
+  window.NC_Asistencia = { render, switchSub, openEditarSesionModal, openModalAlumno };
 })();

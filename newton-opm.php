@@ -19,6 +19,7 @@ require_once NC_PATH . 'includes/class-nc-asistencia-db.php';
 require_once NC_PATH . 'includes/class-nc-examenes-db.php';
 require_once NC_PATH . 'includes/class-nc-examenes-import.php';
 require_once NC_PATH . 'includes/class-nc-rest.php';
+require_once NC_PATH . 'includes/class-nc-simulacro-import.php';
 require_once NC_PATH . 'includes/class-nc-rest-asistencia.php';
 require_once NC_PATH . 'includes/class-nc-rest-examenes.php';
 require_once NC_PATH . 'includes/class-nc-shortcode.php';

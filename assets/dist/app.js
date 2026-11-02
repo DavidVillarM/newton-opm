@@ -1565,6 +1565,7 @@
       id: 'reportes-main', label: 'Reportes', icon: 'reportes',
       children: [
         { label: 'Reportes por fecha', screen: 'reportes-fecha' },
+        { label: 'Listado por grupo', screen: 'lista-grupos' },
         { label: 'Reporte general', screen: 'reportes' },
       ],
     },
@@ -1775,7 +1776,11 @@
         return;
       }
       if (s.dataset.screen && screen && s.dataset.screen === screen) on = true;
-      if (s.dataset.asisSub && asisSub && s.dataset.asisSub === asisSub) on = true;
+      if (s.dataset.asisSub && asisSub) {
+        if (s.dataset.asisSub === asisSub) on = true;
+        // Crear / importar / lista viven bajo Simulacro.
+        if (s.dataset.asisSub === 'simulacro' && String(asisSub).indexOf('simulacro') === 0) on = true;
+      }
       if (s.dataset.examSub && examSub && s.dataset.examSub === examSub) on = true;
       s.dataset.active = on ? '1' : '0';
     });
@@ -1881,6 +1886,7 @@
     facultades: 'admin-main',
     docentes: 'admin-main',
     'reportes-fecha': 'reportes-main',
+    'lista-grupos': 'reportes-main',
     reportes: 'reportes-main',
     asistencia: 'asistencia-main',
     puntajes: 'puntajes-main',
@@ -1901,6 +1907,7 @@
       facultades: renderFacultadesCarrerasCrud,
       docentes: renderDocentes,
       'reportes-fecha': renderReportesFecha,
+      'lista-grupos': renderListaGrupos,
       reportes: renderReportesFecha,
     };
     const fn = map[screenId];
@@ -1973,12 +1980,18 @@
     if (id === 'asistencia-main' || id === 'asistencia') {
       const sub = asisSub;
       if (window.NC_Asistencia && typeof window.NC_Asistencia.render === 'function') {
-        await window.NC_Asistencia.render(view, { initialSub: sub });
+        const alreadyMounted = !!(view && view.querySelector && view.querySelector('#nc-asistencia-content'));
+        if (alreadyMounted && typeof window.NC_Asistencia.switchSub === 'function' && sub) {
+          window.NC_Asistencia.switchSub(sub);
+        } else {
+          await window.NC_Asistencia.render(view, { initialSub: sub });
+        }
       } else {
         view.innerHTML = '<div class="nc-card"><p>Módulo de asistencia no disponible. Compruebe que asistencia.js esté cargado.</p></div>';
       }
       const usedAsis = (window.NC_AppState && window.NC_AppState.load().asistenciaSub) || sub || 'dashboard';
-      setActiveTab('asistencia-main', { asistenciaSub: usedAsis });
+      const navAsis = String(usedAsis || '').indexOf('simulacro') === 0 ? 'simulacro' : usedAsis;
+      setActiveTab('asistencia-main', { asistenciaSub: navAsis });
     }
 
     if (id === 'puntajes-main' || id === 'puntajes') {
@@ -1993,8 +2006,9 @@
     }
 
     if (id === 'reportes-main' || route.mainTab === 'reportes-main') {
-      const screen = (route.screen === 'reportes' || route.screen === 'reportes-fecha') ? route.screen : 'reportes-fecha';
-      renderReportesFecha();
+      const reportesScreens = ['reportes', 'reportes-fecha', 'lista-grupos'];
+      const screen = (route.screen && reportesScreens.includes(route.screen)) ? route.screen : 'reportes-fecha';
+      runScreen(screen);
       setActiveTab('reportes-main', { screen });
     }
 
@@ -2067,26 +2081,62 @@
     </svg>`;
   }
 
-  function opmDeltaHtml(current, previous, suffix) {
-    const cur = Number(current || 0);
-    const prev = Number(previous || 0);
-    const diff = Math.round((cur - prev) * 10) / 10;
-    const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
-    const sign = diff > 0 ? '+' : '';
-    return `<div class="opm-kpi-delta ${cls}">${sign}${diff}${suffix || ''} vs. mes anterior</div>`;
-  }
-
   function fmtPct(n) {
     const v = Number(n);
     return Number.isFinite(v) ? v.toFixed(1) + '%' : '0.0%';
   }
 
+  function localIso(d) {
+    const dt = d || new Date();
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function localYm(d) {
+    return localIso(d).slice(0, 7);
+  }
+
+  function monthBounds(ym) {
+    const parts = String(ym || '').split('-');
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!y || !m) {
+      const now = localYm(new Date());
+      return monthBounds(now);
+    }
+    return {
+      from: localIso(new Date(y, m - 1, 1)),
+      to: localIso(new Date(y, m, 0)),
+    };
+  }
+
+  function monthLabelEs(ym) {
+    const parts = String(ym || '').split('-');
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!y || !m) return '';
+    const s = new Date(y, m - 1, 1).toLocaleDateString('es-PY', { month: 'long', year: 'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function trendHasta(ym) {
+    const bounds = monthBounds(ym);
+    const today = localIso(new Date());
+    return bounds.to < today ? bounds.to : today;
+  }
+
+  const OPM_MESES_CORTOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
   // ===================== DASHBOARD =====================
   function renderDashboard() {
-    const today = new Date().toISOString().slice(0, 10);
-    const from30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const periodLabel = new Date().toLocaleDateString('es-PY', { month: 'long', year: 'numeric' });
-    const periodLabelCap = periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1);
+    let dashMes = localYm(new Date());
+    window.NC_DASH_MES = dashMes;
+    const bounds0 = monthBounds(dashMes);
+    const today = bounds0.to;
+    const from30 = bounds0.from;
+    const periodLabelCap = monthLabelEs(dashMes);
     view.innerHTML = '';
     const card = el('div', { class: 'opm-dash' }, `
       <div class="opm-dash-hero">
@@ -2094,7 +2144,22 @@
           <h1>¡Bienvenido a Newton OPM!</h1>
           <p>Aquí tienes un resumen general de la actividad académica de tu institución.</p>
         </div>
-        <div class="opm-period-chip">${escapeHtml(periodLabelCap)}</div>
+        <div class="opm-period" id="opm_period">
+          <button type="button" class="opm-period-chip" id="opm_period_btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="opm_period_pop">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+            <span id="opm_period_label">${escapeHtml(periodLabelCap)}</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="opm-period-pop" id="opm_period_pop" role="dialog" aria-label="Seleccionar mes" hidden>
+            <div class="opm-period-year">
+              <button type="button" id="opm_period_prev" aria-label="Año anterior">‹</button>
+              <strong id="opm_period_year"></strong>
+              <button type="button" id="opm_period_next" aria-label="Año siguiente">›</button>
+            </div>
+            <div class="opm-period-months" id="opm_period_months"></div>
+            <button type="button" class="opm-period-today" id="opm_period_today">Mes actual</button>
+          </div>
+        </div>
       </div>
 
       <div class="opm-kpi-grid">
@@ -2170,7 +2235,7 @@
           <div class="opm-panel-h">
             <div>
               <h3>Últimas asistencias registradas</h3>
-              <p>Registros más recientes del sistema.</p>
+              <p id="opm_dash_sesiones_sub">Registros de ${escapeHtml(periodLabelCap)}.</p>
             </div>
             <button type="button" class="opm-link-btn" id="nc_dash_asistencia_ver_mas">Ver todas</button>
           </div>
@@ -2300,138 +2365,222 @@
       });
     }
 
-    (async () => {
+    let dashLoadGen = 0;
+    let trendGen = 0;
+    let pickerYear = Number(dashMes.slice(0, 4));
+    const minPickerYear = new Date().getFullYear() - 8;
+
+    function closePeriodPop() {
+      const pop = document.getElementById('opm_period_pop');
+      const btn = document.getElementById('opm_period_btn');
+      if (pop) pop.hidden = true;
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function renderPeriodMonths(year) {
+      const box = document.getElementById('opm_period_months');
+      const yearEl = document.getElementById('opm_period_year');
+      const prev = document.getElementById('opm_period_prev');
+      const next = document.getElementById('opm_period_next');
+      if (yearEl) yearEl.textContent = String(year);
+      const now = new Date();
+      const nowY = now.getFullYear();
+      const nowM = now.getMonth() + 1;
+      if (prev) prev.disabled = year <= minPickerYear;
+      if (next) next.disabled = year >= nowY;
+      if (!box) return;
+      const sel = dashMes.split('-').map(Number);
+      box.innerHTML = OPM_MESES_CORTOS.map((name, i) => {
+        const m = i + 1;
+        const ym = year + '-' + String(m).padStart(2, '0');
+        const future = year > nowY || (year === nowY && m > nowM);
+        const selected = year === sel[0] && m === sel[1];
+        const current = year === nowY && m === nowM;
+        const cls = 'opm-period-month' + (selected ? ' is-selected' : '') + (current && !selected ? ' is-current' : '');
+        return `<button type="button" class="${cls}" data-ym="${ym}"${future ? ' disabled' : ''}>${name}</button>`;
+      }).join('');
+    }
+
+    function placePeriodPop() {
+      const pop = document.getElementById('opm_period_pop');
+      if (!pop) return;
+      pop.style.left = '';
+      pop.style.right = '0';
+      const rect = pop.getBoundingClientRect();
+      if (rect.left < 8) {
+        pop.style.right = 'auto';
+        pop.style.left = '0';
+      }
+    }
+
+    function openPeriodPop() {
+      const pop = document.getElementById('opm_period_pop');
+      const btn = document.getElementById('opm_period_btn');
+      if (!pop || !btn) return;
+      if (!pop.hidden) {
+        closePeriodPop();
+        return;
+      }
+      pickerYear = Number(String(dashMes).slice(0, 4)) || new Date().getFullYear();
+      renderPeriodMonths(pickerYear);
+      pop.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      placePeriodPop();
+    }
+
+    const periodBtn = document.getElementById('opm_period_btn');
+    if (periodBtn) periodBtn.onclick = (e) => { e.stopPropagation(); openPeriodPop(); };
+    const periodPrev = document.getElementById('opm_period_prev');
+    const periodNext = document.getElementById('opm_period_next');
+    if (periodPrev) periodPrev.onclick = () => { if (pickerYear > minPickerYear) renderPeriodMonths(--pickerYear); };
+    if (periodNext) periodNext.onclick = () => { if (pickerYear < new Date().getFullYear()) renderPeriodMonths(++pickerYear); };
+    const periodMonths = document.getElementById('opm_period_months');
+    if (periodMonths) {
+      periodMonths.onclick = (e) => {
+        const btn = e.target.closest('[data-ym]');
+        if (!btn || btn.disabled) return;
+        closePeriodPop();
+        applyDashMonth(btn.dataset.ym);
+      };
+    }
+    const periodToday = document.getElementById('opm_period_today');
+    if (periodToday) {
+      periodToday.onclick = () => {
+        closePeriodPop();
+        applyDashMonth(localYm(new Date()));
+      };
+    }
+    if (window._ncPeriodOutside) document.removeEventListener('click', window._ncPeriodOutside);
+    window._ncPeriodOutside = (ev) => {
+      const wrap = document.getElementById('opm_period');
+      if (!wrap || wrap.contains(ev.target)) return;
+      closePeriodPop();
+    };
+    document.addEventListener('click', window._ncPeriodOutside);
+    if (window._ncPeriodEsc) document.removeEventListener('keydown', window._ncPeriodEsc);
+    window._ncPeriodEsc = (ev) => { if (ev.key === 'Escape') closePeriodPop(); };
+    document.addEventListener('keydown', window._ncPeriodEsc);
+
+    function setAsisDelta(current, previous) {
+      const el = document.getElementById('opm_kpi_asistencia_delta');
+      if (!el) return;
+      const cur = Number(current || 0);
+      const prev = Number(previous || 0);
+      const diff = Math.round((cur - prev) * 10) / 10;
+      const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
+      const sign = diff > 0 ? '+' : '';
+      el.className = 'opm-kpi-delta ' + cls;
+      el.textContent = sign + diff + ' pp vs. mes anterior';
+    }
+
+    function renderPorGrupoTable(aulasDiv, porAula) {
+      if (!aulasDiv) return;
+      if (!porAula.length) {
+        aulasDiv.innerHTML = '<div class="opm-empty">No hay datos por grupo.</div>';
+        return;
+      }
+      const showAlumnosCol = userPermissions.isAdmin();
+      aulasDiv.innerHTML = `
+        <table>
+          <thead><tr><th>Grupo</th>${showAlumnosCol ? '<th>Alumnos</th>' : ''}<th>Evaluaciones</th></tr></thead>
+          <tbody>
+            ${porAula.map(a => `
+              <tr>
+                <td>${escapeHtml(a.aula_nombre || '')}</td>${showAlumnosCol ? `<td>${a.alumnos ?? 0}</td>` : ''}<td>${a.evaluaciones ?? 0}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    async function loadConductaStats(ym, alive) {
       try {
-        const fromParam = document.getElementById('nc_dash_from')?.value || from30;
-        const toParam = document.getElementById('nc_dash_to')?.value || today;
-        const data = await api('/dashboard/stats?from=' + encodeURIComponent(fromParam) + '&to=' + encodeURIComponent(toParam));
+        const b = monthBounds(ym);
+        const data = await api('/dashboard/stats?mes=' + encodeURIComponent(ym) + '&from=' + encodeURIComponent(b.from) + '&to=' + encodeURIComponent(b.to));
+        if (!alive()) return;
         const stats = document.getElementById('nc_dash_stats');
         const alumnosEvaluados = data.alumnos_evaluados_mes ?? 0;
         const totalAlumnos = data.total_alumnos ?? 0;
+        const registrosPeriodo = data.registros_conducta_periodo ?? data.total_registros_conducta ?? data.total_evaluaciones ?? 0;
+        const mesTxt = monthLabelEs(ym);
+        const evalPhrase = ym === localYm(new Date()) ? 'este mes' : ('en ' + mesTxt);
         const kpiAl = document.getElementById('opm_kpi_alumnos');
         const kpiAlSub = document.getElementById('opm_kpi_alumnos_sub');
         if (kpiAl) kpiAl.textContent = String(totalAlumnos);
-        if (kpiAlSub) kpiAlSub.textContent = `${alumnosEvaluados} evaluados este mes · click para ver`;
+        if (kpiAlSub) kpiAlSub.textContent = alumnosEvaluados + ' evaluados ' + evalPhrase + ' · click para ver';
         const kpiCond = document.getElementById('opm_kpi_conducta');
         const kpiCondSub = document.getElementById('opm_kpi_conducta_sub');
-        if (kpiCond) kpiCond.textContent = String(data.total_registros_conducta ?? data.total_evaluaciones ?? 0);
-        if (kpiCondSub) kpiCondSub.textContent = `${data.total_aulas ?? 0} grupos activos`;
-        stats.innerHTML = `
-          <div class="opm-kpi is-clickable" id="nc_dash_alumnos_evaluados_copy">
-            <div class="opm-kpi-label">Alumnos evaluados (${new Date().toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})})</div>
-            <div class="opm-kpi-value">${alumnosEvaluados}</div>
-            <div class="opm-kpi-delta flat">Click para ver detalles</div>
-          </div>
-          <div class="opm-kpi">
-            <div class="opm-kpi-label">Total aulas</div>
-            <div class="opm-kpi-value">${data.total_aulas ?? 0}</div>
-          </div>
-          <div class="opm-kpi">
-            <div class="opm-kpi-label">Registros conducta</div>
-            <div class="opm-kpi-value">${data.total_registros_conducta ?? data.total_evaluaciones ?? 0}</div>
-          </div>
-        `;
-        const copyCard = document.getElementById('nc_dash_alumnos_evaluados_copy');
-        if (copyCard) copyCard.onclick = () => { if (window.openAlumnosEvaluadosModal) window.openAlumnosEvaluadosModal(); };
-        const aulasDiv = document.getElementById('nc_dash_aulas');
-        const porAula = data.por_aula || [];
-        if (!porAula.length) {
-          aulasDiv.innerHTML = '<div class="opm-empty">No hay datos por grupo.</div>';
-        } else {
-          const showAlumnosCol = userPermissions.isAdmin();
-          aulasDiv.innerHTML = `
-            <table>
-              <thead><tr><th>Grupo</th>${showAlumnosCol ? '<th>Alumnos</th>' : ''}<th>Evaluaciones</th></tr></thead>
-              <tbody>
-                ${porAula.map(a => `
-                  <tr>
-                    <td>${escapeHtml(a.aula_nombre || '')}</td>${showAlumnosCol ? `<td>${a.alumnos ?? 0}</td>` : ''}<td>${a.evaluaciones ?? 0}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+        if (kpiCond) kpiCond.textContent = String(registrosPeriodo);
+        if (kpiCondSub) kpiCondSub.textContent = (data.total_aulas ?? 0) + ' grupos activos';
+        if (stats) {
+          stats.innerHTML = `
+            <div class="opm-kpi is-clickable" id="nc_dash_alumnos_evaluados_copy">
+              <div class="opm-kpi-label">Alumnos evaluados (${escapeHtml(mesTxt)})</div>
+              <div class="opm-kpi-value">${alumnosEvaluados}</div>
+              <div class="opm-kpi-delta flat">Click para ver detalles</div>
+            </div>
+            <div class="opm-kpi">
+              <div class="opm-kpi-label">Total aulas</div>
+              <div class="opm-kpi-value">${data.total_aulas ?? 0}</div>
+            </div>
+            <div class="opm-kpi">
+              <div class="opm-kpi-label">Registros conducta</div>
+              <div class="opm-kpi-value">${registrosPeriodo}</div>
+            </div>
           `;
+          const copyCard = document.getElementById('nc_dash_alumnos_evaluados_copy');
+          if (copyCard) copyCard.onclick = () => { if (window.openAlumnosEvaluadosModal) window.openAlumnosEvaluadosModal(); };
         }
-        (function () {
-          const chartBtn = document.getElementById('nc_dash_btn_chart');
-          if (chartBtn) chartBtn.onclick = withButtonLock(chartBtn, async () => {
-            await loadDashboardCharts();
-            const fromVal = document.getElementById('nc_dash_from')?.value || from30;
-            const toVal = document.getElementById('nc_dash_to')?.value || today;
-            const data2 = await api('/dashboard/stats?from=' + encodeURIComponent(fromVal) + '&to=' + encodeURIComponent(toVal));
-            const porAula2 = data2.por_aula || [];
-            const aulasDiv2 = document.getElementById('nc_dash_aulas');
-            if (aulasDiv2 && porAula2.length) {
-              const showAlumnosCol2 = userPermissions.isAdmin();
-              aulasDiv2.innerHTML = `
-              <table>
-                <thead><tr><th>Grupo</th>${showAlumnosCol2 ? '<th>Alumnos</th>' : ''}<th>Evaluaciones</th></tr></thead>
-                <tbody>
-                  ${porAula2.map(a => `
-                    <tr>
-                      <td>${escapeHtml(a.aula_nombre || '')}</td>${showAlumnosCol2 ? `<td>${a.alumnos ?? 0}</td>` : ''}<td>${a.evaluaciones ?? 0}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            `;
-            }
-          }, { loadingText: 'Cargando...' });
-        })();
+        renderPorGrupoTable(document.getElementById('nc_dash_aulas'), data.por_aula || []);
       } catch (e) {
+        if (!alive()) return;
         const statsEl = document.getElementById('nc_dash_stats');
         const aulasEl = document.getElementById('nc_dash_aulas');
         if (statsEl) statsEl.innerHTML = '<div style="color:#b00">Error al cargar estadísticas.</div>';
         if (aulasEl) aulasEl.innerHTML = '';
       }
-    })();
+    }
 
     async function loadTrend(agrupacion) {
+      const gen = ++trendGen;
       const cont = document.getElementById('opm_dash_trend');
       if (!cont) return;
       try {
-        const historial = await api('/asistencia/dashboard/historial?agrupacion=' + encodeURIComponent(agrupacion || 'mes'));
+        const historial = await api('/asistencia/dashboard/historial?agrupacion=' + encodeURIComponent(agrupacion || 'mes') + '&hasta=' + encodeURIComponent(trendHasta(dashMes)));
+        if (gen !== trendGen) return;
         renderOpmTrendChart(cont, historial.meses || []);
       } catch (e) {
+        if (gen !== trendGen) return;
         cont.innerHTML = '<div class="opm-empty">No se pudo cargar la tendencia.</div>';
       }
     }
-    const trendSeg = document.getElementById('opm_trend_seg');
-    if (trendSeg) {
-      trendSeg.querySelectorAll('button').forEach(b => {
-        b.onclick = () => {
-          trendSeg.querySelectorAll('button').forEach(x => x.dataset.active = x === b ? '1' : '0');
-          loadTrend(b.dataset.agr);
-        };
-      });
-    }
-    loadTrend('mes');
 
-    (async function loadDashboardAsistencia() {
+    async function loadDashboardAsistencia(ym, alive) {
       const loading = document.getElementById('nc_dash_asistencia_loading');
       const content = document.getElementById('nc_dash_asistencia_content');
       const error = document.getElementById('nc_dash_asistencia_error');
-      const mesActual = new Date().toISOString().slice(0, 7);
       try {
-        const data = await api('/asistencia/dashboard?mes=' + encodeURIComponent(mesActual));
+        const data = await api('/asistencia/dashboard?mes=' + encodeURIComponent(ym));
+        if (!alive()) return;
         if (loading) loading.style.display = 'none';
         if (error) error.style.display = 'none';
         if (content) content.style.display = 'none';
         const pctActual = Number(data.promedio_actual ?? 0);
         const pctAnt = Number(data.promedio_anterior ?? 0);
         const kpiAsis = document.getElementById('opm_kpi_asistencia');
-        const kpiAsisD = document.getElementById('opm_kpi_asistencia_delta');
         if (kpiAsis) kpiAsis.textContent = fmtPct(pctActual);
-        if (kpiAsisD) kpiAsisD.outerHTML = opmDeltaHtml(pctActual, pctAnt, ' pp');
+        setAsisDelta(pctActual, pctAnt);
         const fmt = (n) => Number(n).toFixed(2);
         const statsBox = document.getElementById('nc_dash_asistencia_stats');
         if (statsBox) {
           const diff = Math.round((pctActual - pctAnt) * 100) / 100;
+          const mesTxt = monthLabelEs(ym);
           statsBox.innerHTML = `
-            <div class="opm-kpi"><div class="opm-kpi-label">Promedio mes actual</div><div class="opm-kpi-value">${fmt(pctActual)}%</div></div>
+            <div class="opm-kpi"><div class="opm-kpi-label">Promedio ${escapeHtml(mesTxt)}</div><div class="opm-kpi-value">${fmt(pctActual)}%</div></div>
             <div class="opm-kpi"><div class="opm-kpi-label">Promedio mes anterior</div><div class="opm-kpi-value">${fmt(pctAnt)}%</div></div>
             <div class="opm-kpi"><div class="opm-kpi-label">Variación</div><div class="opm-kpi-value">${diff >= 0 ? '+' : ''}${fmt(diff)}%</div></div>
-            <div class="opm-kpi"><div class="opm-kpi-label">Sesiones mes actual</div><div class="opm-kpi-value">${data.sesiones_mes_actual ?? 0}</div></div>
+            <div class="opm-kpi"><div class="opm-kpi-label">Sesiones del mes</div><div class="opm-kpi-value">${data.sesiones_mes_actual ?? 0}</div></div>
           `;
         }
         const porAula = data.por_aula || [];
@@ -2461,30 +2610,32 @@
             `;
           }
         }
-        const verMas = document.getElementById('nc_dash_asistencia_ver_mas');
-        if (verMas) {
-          verMas.onclick = (e) => { e.preventDefault(); if (typeof openTab === 'function') openTab('asistencia'); };
-        }
       } catch (e) {
+        if (!alive()) return;
         if (loading) loading.style.display = 'none';
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'block';
         const kpiAsis = document.getElementById('opm_kpi_asistencia');
         const kpiAsisD = document.getElementById('opm_kpi_asistencia_delta');
         if (kpiAsis) kpiAsis.textContent = '—';
-        if (kpiAsisD) kpiAsisD.textContent = 'Módulo no disponible';
+        if (kpiAsisD) {
+          kpiAsisD.className = 'opm-kpi-delta flat';
+          kpiAsisD.textContent = 'Módulo no disponible';
+        }
       }
-    })();
+    }
 
-    (async function loadSesionesRecientes() {
+    async function loadSesionesRecientes(ym, alive) {
       const box = document.getElementById('opm_dash_sesiones');
       if (!box) return;
+      const b = monthBounds(ym);
       try {
-        const res = await api('/asistencia/sesiones');
+        const res = await api('/asistencia/sesiones?fecha_desde=' + encodeURIComponent(b.from) + '&fecha_hasta=' + encodeURIComponent(b.to));
+        if (!alive()) return;
         const items = Array.isArray(res) ? res : (res.items || []);
         const latest = items.slice(0, 6);
         if (!latest.length) {
-          box.innerHTML = '<div class="opm-empty">Todavía no hay asistencias registradas.</div>';
+          box.innerHTML = '<div class="opm-empty">No hay asistencias registradas en este mes.</div>';
           return;
         }
         box.innerHTML = `
@@ -2498,7 +2649,7 @@
                 return `<tr>
                   <td>${escapeHtml(s.fecha || '')}</td>
                   <td>${escapeHtml(s.materia_nombre || '')}</td>
-                  <td>${escapeHtml(s.grupo_nombre || s.aula_nombre || '')}</td>
+                  <td>${escapeHtml((Number(s.es_simulacro) === 1 || Number(s.simulacro_id) > 0 || String(s.subgrupo || '').toLowerCase() === 'simulacro' || String(s.grupo_nombre || '').trim().toLowerCase() === 'simulacro') ? 'Simulacro' : (s.grupo_nombre || s.aula_nombre || ''))}</td>
                   <td><span class="${ok ? 'opm-badge-si' : 'opm-badge-no'}">${escapeHtml(pt)}</span></td>
                   <td>${escapeHtml(s.creado_por_nombre || '')}</td>
                 </tr>`;
@@ -2507,23 +2658,76 @@
           </table>
         `;
       } catch (e) {
+        if (!alive()) return;
         box.innerHTML = '<div class="opm-empty">No se pudieron cargar las asistencias recientes.</div>';
       }
-    })();
-
-    if (userPermissions.isAdmin()) {
-      (async function loadExamenesKpi() {
-        try {
-          const res = await api('/examenes');
-          const items = res && Array.isArray(res.items) ? res.items : (Array.isArray(res) ? res : []);
-          const eln = document.getElementById('opm_kpi_examenes');
-          if (eln) eln.textContent = String(items.length);
-        } catch (e) {
-          const eln = document.getElementById('opm_kpi_examenes');
-          if (eln) eln.textContent = '—';
-        }
-      })();
     }
+
+    async function loadExamenesKpi(ym, alive) {
+      const eln = document.getElementById('opm_kpi_examenes');
+      if (!userPermissions.isAdmin() || !eln) return;
+      const b = monthBounds(ym);
+      try {
+        const res = await api('/examenes?fecha_desde=' + encodeURIComponent(b.from) + '&fecha_hasta=' + encodeURIComponent(b.to));
+        if (!alive()) return;
+        const items = res && Array.isArray(res.items) ? res.items : (Array.isArray(res) ? res : []);
+        eln.textContent = String(items.length);
+      } catch (e) {
+        if (!alive()) return;
+        eln.textContent = '—';
+      }
+    }
+
+    async function applyDashMonth(ym) {
+      if (!/^\d{4}-\d{2}$/.test(String(ym || ''))) return;
+      if (ym > localYm(new Date())) return;
+      dashMes = ym;
+      window.NC_DASH_MES = ym;
+      const label = document.getElementById('opm_period_label');
+      if (label) label.textContent = monthLabelEs(ym);
+      const b = monthBounds(ym);
+      const fromEl = document.getElementById('nc_dash_from');
+      const toEl = document.getElementById('nc_dash_to');
+      if (fromEl) fromEl.value = b.from;
+      if (toEl) toEl.value = b.to;
+      const sesSub = document.getElementById('opm_dash_sesiones_sub');
+      if (sesSub) sesSub.textContent = 'Registros de ' + monthLabelEs(ym) + '.';
+      const gen = ++dashLoadGen;
+      const alive = () => gen === dashLoadGen;
+      const agrBtn = document.querySelector('#opm_trend_seg button[data-active="1"]');
+      await Promise.all([
+        loadConductaStats(ym, alive),
+        loadDashboardAsistencia(ym, alive),
+        loadSesionesRecientes(ym, alive),
+        loadExamenesKpi(ym, alive),
+        loadTrend(agrBtn ? agrBtn.dataset.agr : 'mes'),
+      ]);
+      const dist = document.getElementById('opm_dash_conducta_dist');
+      if (dist && dist.open && alive()) await loadDashboardCharts();
+    }
+
+    const verMas = document.getElementById('nc_dash_asistencia_ver_mas');
+    if (verMas) {
+      verMas.onclick = (e) => { e.preventDefault(); if (typeof openTab === 'function') openTab('asistencia'); };
+    }
+    const trendSeg = document.getElementById('opm_trend_seg');
+    if (trendSeg) {
+      trendSeg.querySelectorAll('button').forEach(b => {
+        b.onclick = () => {
+          trendSeg.querySelectorAll('button').forEach(x => x.dataset.active = x === b ? '1' : '0');
+          loadTrend(b.dataset.agr);
+        };
+      });
+    }
+    const chartBtn = document.getElementById('nc_dash_btn_chart');
+    if (chartBtn) chartBtn.onclick = withButtonLock(chartBtn, async () => {
+      await loadDashboardCharts();
+      const fromVal = document.getElementById('nc_dash_from')?.value || from30;
+      const toVal = document.getElementById('nc_dash_to')?.value || today;
+      const data2 = await api('/dashboard/stats?mes=' + encodeURIComponent(dashMes) + '&from=' + encodeURIComponent(fromVal) + '&to=' + encodeURIComponent(toVal));
+      renderPorGrupoTable(document.getElementById('nc_dash_aulas'), data2.por_aula || []);
+    }, { loadingText: 'Cargando...' });
+    applyDashMonth(dashMes);
 
     async function loadDashboardCharts() {
       const from = document.getElementById('nc_dash_from')?.value || from30;
@@ -2573,6 +2777,8 @@
     if (window._ncOpenAlumnosEvaluadosPending || alumnosEvaluadosModalInstance) return;
     window._ncOpenAlumnosEvaluadosPending = true;
     try {
+    const mesSel = (window.NC_DASH_MES && /^\d{4}-\d{2}$/.test(window.NC_DASH_MES)) ? window.NC_DASH_MES : localYm(new Date());
+    const mesTxt = monthLabelEs(mesSel);
     const body = el('div');
     body.innerHTML = `
       <div style="margin-bottom:16px">
@@ -2600,7 +2806,7 @@
           <button class="nc-btn" id="nc_ae_btn_buscar" style="align-self:flex-end">Buscar</button>
         </div>
         <div style="font-size:12px;color:#666;margin-top:8px">
-          Mes actual: <b>${new Date().toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})}</b>
+          Mes: <b>${escapeHtml(mesTxt)}</b>
         </div>
       </div>
       <div id="nc_ae_list" style="max-height:500px;overflow:auto;border:1px solid #ddd;border-radius:8px;padding:8px">
@@ -2608,7 +2814,7 @@
       </div>
     `;
 
-    const modal = openModal('Alumnos evaluados este mes', body, [
+    const modal = openModal('Alumnos evaluados — ' + mesTxt, body, [
       { label: 'Cerrar', className: 'secondary', onClick: (m) => { alumnosEvaluadosModalInstance = null; alumnosEvaluadosLoadFn = null; m.close(); } }
     ]);
     
@@ -2619,7 +2825,7 @@
       const search = (document.getElementById('nc_ae_search') || {}).value || '';
       const curso_id = document.getElementById('nc_ae_curso').value || null;
       const aula_id = document.getElementById('nc_ae_aula').value || null;
-      const qs = new URLSearchParams({ filter });
+      const qs = new URLSearchParams({ filter, mes: mesSel });
       if (search.trim()) qs.set('search', search.trim());
       if (curso_id) qs.set('curso_id', curso_id);
       if (aula_id) qs.set('aula_id', aula_id);
@@ -4338,6 +4544,241 @@
     })();
     document.getElementById('mr_search').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadMisRegistros(); });
     setSub('mr-individual');
+  }
+
+  // ===================== LISTADO POR GRUPO (PDF) =====================
+  async function downloadGrupoListaPdf(aulaId, aulaNombre, estado) {
+    const extra = (estado === 'inactivos' || estado === 'listas') ? ('&estado=' + encodeURIComponent(estado)) : '';
+    let url = `${API}/aulas/${encodeURIComponent(aulaId)}/lista/pdf?nc_ts=${Date.now()}${extra}`;
+    const headers = {};
+    if (NC_APP && NC_APP.nonce) headers['X-WP-Nonce'] = NC_APP.nonce;
+    const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store', headers });
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      let msg = 'No se pudo exportar el PDF.';
+      try {
+        const j = JSON.parse(err);
+        if (j && j.message) msg = j.message;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const ctype = (res.headers.get('content-type') || '').toLowerCase();
+    if (ctype.includes('application/json') || ctype.includes('text/html')) {
+      throw new Error('El servidor no devolvió un PDF.');
+    }
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";\n]+)"?/i);
+    let fileName = (match && match[1]) ? decodeURIComponent(match[1].replace(/"/g, '').trim()) : '';
+    if (!fileName) {
+      const safe = String(aulaNombre || 'grupo').replace(/[^\w.\-]+/g, '_');
+      const suffix = estado === 'inactivos' ? '_inactivos' : (estado === 'listas' ? '_desvinculados' : '');
+      fileName = 'lista_' + safe + suffix + '.pdf';
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  function renderListaGrupos() {
+    if (window.NC_AppState) window.NC_AppState.persistRoute({ mainTab: 'reportes-main', screen: 'lista-grupos' });
+    view.innerHTML = '';
+    const card = el('div', { class: 'nc-card' });
+    card.innerHTML = `
+      <h3 style="margin:0 0 8px">Listado de alumnos por grupo</h3>
+      <p style="margin:0 0 12px;color:#666;font-size:13px">Un PDF por grupo, con apellido, nombre, cédula y curso. Activos es el padrón actual. Inactivos son los dados de baja. Desvinculados recupera a quienes se les quitó el curso y figuraron en una lista de asistencia de ese grupo.</p>
+      <div class="nc-row">
+        <div class="nc-field">
+          <label>Alumnos</label>
+          <select id="lg_estado">
+            <option value="activos" selected>Activos</option>
+            <option value="inactivos">Inactivos</option>
+            <option value="listas">Desvinculados (listas)</option>
+          </select>
+        </div>
+        <div class="nc-field">
+          <label>Buscar grupo</label>
+          <input id="lg_search" placeholder="Ej: CNA, Lambda, Presencial, Mu" />
+        </div>
+        <div class="nc-field">
+          <label>Curso</label>
+          <select id="lg_curso">${cursosOptions(true)}</select>
+        </div>
+      </div>
+    `;
+
+    const out = el('div', { class: 'nc-card' }, `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Grupos</h3>
+        <div id="lg_count" class="nc-pill">0</div>
+      </div>
+      <div style="overflow:auto;margin-top:10px">
+        <table>
+          <thead>
+            <tr>
+              <th>Grupo</th>
+              <th>Curso</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="lg_tbody"></tbody>
+        </table>
+      </div>
+    `);
+
+    view.appendChild(card);
+    view.appendChild(out);
+
+    const searchEl = document.getElementById('lg_search');
+    const cursoEl = document.getElementById('lg_curso');
+    const estadoEl = document.getElementById('lg_estado');
+    let gruposAll = null;
+    let cursosAll = null;
+
+    function modoLista() {
+      return (estadoEl && estadoEl.value) || 'activos';
+    }
+
+    function esHistorico() {
+      const modo = modoLista();
+      return modo === 'inactivos' || modo === 'listas';
+    }
+
+    function sourceGrupos() {
+      return esHistorico() ? (gruposAll || []) : (aulas || []);
+    }
+
+    function fillCursos() {
+      const prev = cursoEl.value;
+      const list = esHistorico() ? (cursosAll || cursos || []) : (cursos || []);
+      const opts = ['<option value="">Todos</option>'];
+      list.forEach(c => {
+        const marca = (esHistorico() && String(c.activo) === '0') ? ' (inactivo)' : '';
+        opts.push(`<option value="${escapeAttr(c.id)}">${escapeHtml(c.nombre || '')}${escapeHtml(marca)}</option>`);
+      });
+      cursoEl.innerHTML = opts.join('');
+      if (prev && [...cursoEl.options].some(o => o.value === prev)) cursoEl.value = prev;
+    }
+
+    function tokensNombre(nombre) {
+      return String(nombre || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .split(/[^a-z0-9]+/).filter(Boolean);
+    }
+
+    function esCeaIngenieria(nombre) {
+      const t = tokensNombre(nombre);
+      if (!t.length || t.includes('cna')) return false;
+      return t.includes('mu') || t.includes('nu') || t.includes('zeta');
+    }
+
+    function cursoCea() {
+      const list = esHistorico() ? (cursosAll || cursos || []) : (cursos || []);
+      let fallback = null;
+      for (const c of list) {
+        const t = tokensNombre(c.nombre);
+        if (t.includes('cna') || !t.includes('cea')) continue;
+        if (t.length === 1) return c;
+        if (!fallback) fallback = c;
+      }
+      return fallback;
+    }
+
+    function cursoDeGrupo(a) {
+      if (esCeaIngenieria(a.nombre)) {
+        const cea = cursoCea();
+        if (cea) return { id: cea.id, nombre: cea.nombre || 'CEA' };
+      }
+      return { id: a.curso_id, nombre: a.curso_nombre || '' };
+    }
+
+    function filteredGrupos() {
+      const q = (searchEl.value || '').trim().toLowerCase();
+      const cursoId = cursoEl.value;
+      return sourceGrupos().filter(a => {
+        if (!esHistorico() && String(a.activo) === '0') return false;
+        const curso = cursoDeGrupo(a);
+        if (cursoId && String(curso.id || '') !== String(cursoId)) return false;
+        if (!q) return true;
+        const nombre = String(a.nombre || '').toLowerCase();
+        const cursoNom = String(curso.nombre || '').toLowerCase();
+        return nombre.includes(q) || cursoNom.includes(q);
+      });
+    }
+
+    function paint() {
+      const rows = filteredGrupos();
+      const tbody = document.getElementById('lg_tbody');
+      const count = document.getElementById('lg_count');
+      const labels = { inactivos: 'Exportar inactivos', listas: 'Exportar desvinculados' };
+      const btnLabel = labels[modoLista()] || 'Exportar PDF';
+      if (count) count.textContent = String(rows.length);
+      if (!tbody) return;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="3" style="color:#666">No hay grupos con ese filtro.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(a => {
+        const inactivo = String(a.activo) === '0';
+        const marca = inactivo ? ' <span style="color:#a15c07;font-size:12px">(grupo inactivo)</span>' : '';
+        const curso = cursoDeGrupo(a);
+        return `
+        <tr>
+          <td>${escapeHtml(a.nombre || '')}${marca}</td>
+          <td>${escapeHtml(curso.nombre || '')}</td>
+          <td style="text-align:right">
+            <button type="button" class="nc-btn secondary small" data-lg-pdf="${escapeAttr(a.id)}">${escapeHtml(btnLabel)}</button>
+          </td>
+        </tr>`;
+      }).join('');
+      tbody.querySelectorAll('[data-lg-pdf]').forEach(btn => {
+        btn.onclick = withButtonLock(btn, async () => {
+          const id = btn.getAttribute('data-lg-pdf');
+          const grupo = sourceGrupos().find(x => String(x.id) === String(id));
+          const nombre = grupo ? (grupo.nombre || 'grupo') : 'grupo';
+          const estado = modoLista();
+          setLoading(true);
+          try {
+            await downloadGrupoListaPdf(id, nombre, estado);
+            toast('PDF descargado.');
+          } catch (e) {
+            toast('ERROR: ' + e.message, 'err');
+          } finally {
+            setLoading(false);
+          }
+        }, { loadingText: 'Exportando...' });
+      });
+    }
+
+    async function onEstadoChange() {
+      if (esHistorico() && !gruposAll) {
+        setLoading(true);
+        try {
+          const [g, c] = await Promise.all([
+            api('/aulas?activo=all'),
+            api('/cursos?activo=all'),
+          ]);
+          gruposAll = Array.isArray(g) ? g : [];
+          cursosAll = Array.isArray(c) ? c : [];
+        } catch (e) {
+          toast('ERROR: ' + e.message, 'err');
+          estadoEl.value = 'activos';
+        } finally {
+          setLoading(false);
+        }
+      }
+      fillCursos();
+      paint();
+    }
+
+    searchEl.addEventListener('input', paint);
+    cursoEl.addEventListener('change', paint);
+    estadoEl.addEventListener('change', onEstadoChange);
+    paint();
   }
 
   // ===================== REPORTES POR FECHA =====================

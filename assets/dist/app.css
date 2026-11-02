@@ -1097,6 +1097,10 @@ body.opm-app-page #wpadminbar ~ * {
   font-size: 14px;
 }
 
+.opm-period {
+  position: relative;
+}
+
 .opm-period-chip {
   display: inline-flex;
   align-items: center;
@@ -1108,6 +1112,132 @@ body.opm-app-page #wpadminbar ~ * {
   color: var(--opm-navy);
   font-size: 13px;
   font-weight: 600;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.opm-period-chip:hover,
+.opm-period-chip[aria-expanded="true"] {
+  border-color: var(--opm-blue);
+  background: var(--opm-hover);
+}
+
+.opm-period-chip svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.opm-period-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: 248px;
+  padding: 12px;
+  background: var(--opm-card);
+  border: 1px solid var(--opm-border);
+  border-radius: 14px;
+  box-shadow: var(--opm-shadow);
+}
+
+.opm-period-pop[hidden] {
+  display: none !important;
+}
+
+.opm-period-year {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: var(--opm-navy);
+}
+
+.opm-period-year strong {
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.opm-period-year button,
+.opm-period-today,
+.opm-period-month {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.opm-period-year button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-subtle);
+  color: var(--opm-navy);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.opm-period-year button:hover:not(:disabled) {
+  background: var(--opm-hover);
+}
+
+.opm-period-year button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.opm-period-months {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.opm-period-month {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--opm-text);
+  border-radius: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.opm-period-month:hover:not(:disabled) {
+  background: var(--opm-hover);
+}
+
+.opm-period-month.is-current {
+  border-color: var(--opm-blue);
+}
+
+.opm-period-month.is-selected {
+  background: var(--opm-blue);
+  color: var(--opm-on-accent);
+  border-color: var(--opm-blue);
+}
+
+.opm-period-month:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.opm-period-today {
+  margin-top: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--opm-blue);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 0 2px;
+}
+
+.opm-period-today:hover {
+  text-decoration: underline;
 }
 
 .opm-kpi-grid {

@@ -462,6 +462,15 @@ class NC_Rest {
         'permission_callback' => [__CLASS__, 'can_access'],
       ],
     ]);
+
+    // Listado de alumnos del grupo (padrón: curso, nombre, apellido, cédula)
+    register_rest_route($ns, '/aulas/(?P<id>\d+)/lista/pdf', [
+      [
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => [__CLASS__, 'export_aula_lista_pdf'],
+        'permission_callback' => [__CLASS__, 'can_access'],
+      ],
+    ]);
     
     // ============================================================================
     // RUTAS PARA EXPORTACIÓN DE RENDIMIENTO POR CURSO
@@ -884,15 +893,17 @@ class NC_Rest {
     $curso_id     = self::int_or_null($req->get_param('curso_id'));
     $facultad_id  = self::int_or_null($req->get_param('facultad_id'));
     $carrera_id   = self::int_or_null($req->get_param('carrera_id'));
+    $activo_param = $req->get_param('activo');
+    $show_all = (is_string($activo_param) && strtolower($activo_param) === 'all');
 
-    $where = 'a.activo=1';
+    $where = $show_all ? '1=1' : 'a.activo=1';
     $params = [];
     if ($curso_id) { $where .= ' AND a.curso_id=%d'; $params[] = $curso_id; }
     if ($facultad_id) { $where .= ' AND a.facultad_id=%d'; $params[] = $facultad_id; }
     if ($carrera_id) { $where .= ' AND a.carrera_id=%d'; $params[] = $carrera_id; }
 
     $sel_subgrupos = self::table_has_column($t_aul, 'subgrupos') ? ', a.subgrupos' : '';
-    $sql = "SELECT a.id, a.nombre, a.turno, a.curso_id, a.facultad_id, a.carrera_id{$sel_subgrupos},
+    $sql = "SELECT a.id, a.nombre, a.turno, a.activo, a.curso_id, a.facultad_id, a.carrera_id{$sel_subgrupos},
                    c.nombre AS curso_nombre,
                    f.nombre AS facultad_nombre,
                    r.nombre AS carrera_nombre
@@ -2795,7 +2806,31 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
   // ---------------- Dashboard y reportes por fecha ----------------
 
   /**
+   * Mes del dashboard: ?mes=YYYY-MM o, si no viene, el mes UTC actual.
+   * @return array{ym:string,inicio:string,fin:string}
+   */
+  private static function dashboard_mes_rango(WP_REST_Request $req): array {
+    $mes_param = self::norm_str($req->get_param('mes'));
+    if ($mes_param !== '' && preg_match('/^\d{4}-\d{2}$/', $mes_param)) {
+      $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $mes_param . '-01');
+      if ($dt instanceof DateTimeImmutable) {
+        return [
+          'ym' => $dt->format('Y-m'),
+          'inicio' => $dt->format('Y-m-01'),
+          'fin' => $dt->format('Y-m-t'),
+        ];
+      }
+    }
+    return [
+      'ym' => gmdate('Y-m'),
+      'inicio' => gmdate('Y-m-01'),
+      'fin' => gmdate('Y-m-t'),
+    ];
+  }
+
+  /**
    * GET /dashboard/stats — estadísticas generales y por aula.
+   * ?mes=YYYY-MM acota alumnos evaluados y registros de conducta a ese mes.
    */
   public static function dashboard_stats(WP_REST_Request $req) {
     global $wpdb;
@@ -2822,9 +2857,10 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     }
     $total_evaluaciones = $total_eval_legacy + $total_eval_hdr;
 
-    // Alumnos evaluados en el mes actual
-    $mes_actual_inicio = gmdate('Y-m-01');
-    $mes_actual_fin = gmdate('Y-m-t');
+    // Alumnos evaluados en el mes pedido (o el mes actual)
+    $mes_rango = self::dashboard_mes_rango($req);
+    $mes_actual_inicio = $mes_rango['inicio'];
+    $mes_actual_fin = $mes_rango['fin'];
     $alumnos_evaluados_mes = 0;
     
     // Contar alumnos únicos con evaluaciones en el mes actual (esquema nuevo)
@@ -2882,19 +2918,35 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
       ];
     }
 
+    $registros_periodo = 0;
+    if (self::table_has_column($t_eval, 'fecha')) {
+      $registros_periodo += (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $t_eval WHERE fecha >= %s AND fecha <= %s",
+        $mes_actual_inicio, $mes_actual_fin
+      ));
+    }
+    if (self::table_has_column($t_hdr, 'fecha') && self::table_has_column($t_it, 'evaluacion_id')) {
+      $registros_periodo += (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $t_it i INNER JOIN $t_hdr h ON h.id = i.evaluacion_id WHERE h.fecha >= %s AND h.fecha <= %s",
+        $mes_actual_inicio, $mes_actual_fin
+      ));
+    }
+
     return self::ok([
       'total_alumnos' => $total_alumnos,
       'total_aulas'   => $total_aulas,
       'total_evaluaciones' => $total_evaluaciones,
       'total_registros_conducta' => $total_eval_legacy + $total_registros_items,
+      'registros_conducta_periodo' => $registros_periodo,
       'alumnos_evaluados_mes' => $alumnos_evaluados_mes,
+      'mes' => $mes_rango['ym'],
       'por_aula'      => $por_aula,
     ]);
   }
 
   /**
-   * GET /dashboard/alumnos-evaluados?filter=evaluados|no_evaluados|todos&aula_id=&curso_id=
-   * Lista de alumnos con su estado de evaluado en el mes actual
+   * GET /dashboard/alumnos-evaluados?filter=evaluados|no_evaluados|todos&aula_id=&curso_id=&mes=YYYY-MM
+   * Lista de alumnos con su estado de evaluado en el mes indicado (o el actual).
    */
   public static function dashboard_alumnos_evaluados(WP_REST_Request $req) {
     global $wpdb;
@@ -2915,9 +2967,9 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     $use_rel = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c)
       && ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
 
-    // Mes actual
-    $mes_actual_inicio = gmdate('Y-m-01');
-    $mes_actual_fin = gmdate('Y-m-t');
+    $mes_rango = self::dashboard_mes_rango($req);
+    $mes_actual_inicio = $mes_rango['inicio'];
+    $mes_actual_fin = $mes_rango['fin'];
 
     // Obtener todos los alumnos activos (y para instalaciones nuevas, sus cursos/grupos reales desde tablas de relación)
     $where = ["a.activo=1"];
@@ -3066,7 +3118,7 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
 
     return self::ok([
       'alumnos' => $result,
-      'mes_actual' => gmdate('Y-m'),
+      'mes_actual' => $mes_rango['ym'],
       'total_evaluados' => count($evaluados_ids),
       'total_no_evaluados' => count($alumnos) - count($evaluados_ids),
     ]);
@@ -4118,6 +4170,313 @@ public static function create_alumno_conducta(WP_REST_Request $req) {
     // EXPORTACIÓN POR AULA
     // ============================================================================
     
+    /**
+     * GET /aulas/:id/lista/pdf?estado=activos|inactivos|listas
+     * Padrón del grupo: apellidos, nombres, cédula y curso.
+     * inactivos: alumnos dados de baja que siguieron vinculados a ese grupo.
+     * listas: alumnos desvinculados del curso que figuraron en una lista de ese grupo.
+     */
+    public static function export_aula_lista_pdf(WP_REST_Request $req) {
+      global $wpdb;
+      $aula_id = (int) $req['id'];
+      if ($aula_id <= 0) return self::err('Grupo inválido.');
+
+      $estado = strtolower(self::norm_str($req->get_param('estado')));
+      $modo = 'activos';
+      if ($estado === 'inactivos' || $estado === 'listas') $modo = $estado;
+      $inactivos = ($modo === 'inactivos');
+
+      $autoload_path = NC_PATH . 'vendor/autoload.php';
+      if (!file_exists($autoload_path)) {
+        return self::err('La exportación en PDF requiere la librería TCPDF en el servidor.', 503);
+      }
+      require_once $autoload_path;
+
+      $t_al   = $wpdb->prefix . 'conducta_alumnos';
+      $t_aul  = NC_DB::table_grupos();
+      $t_cur  = $wpdb->prefix . 'conducta_cursos';
+      $t_al_c = $wpdb->prefix . 'conducta_alumno_cursos';
+      $t_al_a = $wpdb->prefix . 'conducta_alumno_aulas';
+
+      $curso_join = $inactivos
+        ? "LEFT JOIN $t_cur c ON c.id = a.curso_id"
+        : "LEFT JOIN $t_cur c ON c.id = a.curso_id AND c.activo = 1";
+      $aula = $wpdb->get_row($wpdb->prepare(
+        "SELECT a.id, a.curso_id, a.nombre AS aula_nombre, c.nombre AS curso_grupo
+         FROM $t_aul a
+         $curso_join
+         WHERE a.id = %d",
+        $aula_id
+      ), ARRAY_A);
+      if (!$aula) return self::err('Grupo no encontrado.', 404);
+
+      if (class_exists('NC_Rest_Asistencia') && NC_Rest_Asistencia::grupo_es_cea_ingenieria($aula['aula_nombre'] ?? '')) {
+        $cea_id = NC_Rest_Asistencia::id_curso_cea();
+        $cea_nombre = NC_Rest_Asistencia::nombre_curso_cea();
+        if ($cea_id > 0) $aula['curso_id'] = $cea_id;
+        if ($cea_nombre !== '') $aula['curso_grupo'] = $cea_nombre;
+      }
+
+      $has_nombre    = self::table_has_column($t_al, 'nombre');
+      $has_apellido  = self::table_has_column($t_al, 'apellido');
+      $has_grupo_col = self::table_has_column($t_al, 'grupo_id');
+      $use_rel_c = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_c) . "'") === $t_al_c);
+      $use_rel_a = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_al_a) . "'") === $t_al_a);
+
+      $sel_nombres = $has_nombre
+        ? "COALESCE(NULLIF(a.nombres,''), a.nombre)"
+        : 'a.nombres';
+      $sel_apellidos = $has_apellido
+        ? "COALESCE(NULLIF(a.apellidos,''), a.apellido)"
+        : 'a.apellidos';
+
+      $membership = ['a.aula_id = %d'];
+      $params = [$aula_id];
+      if ($has_grupo_col) {
+        $membership[] = 'a.grupo_id = %d';
+        $params[] = $aula_id;
+      }
+      if ($use_rel_a) {
+        $rel_activo = $inactivos ? '' : ' AND ag.activo = 1';
+        $membership[] = "EXISTS (SELECT 1 FROM $t_al_a ag WHERE ag.alumno_id = a.id AND ag.aula_id = %d{$rel_activo})";
+        $params[] = $aula_id;
+      }
+
+      if ($use_rel_c) {
+        $curso_where = $inactivos
+          ? 'ac2.alumno_id = a.id'
+          : 'ac2.alumno_id = a.id AND ac2.activo = 1 AND c2.activo = 1';
+        $curso_sql = "(SELECT GROUP_CONCAT(DISTINCT c2.nombre ORDER BY c2.nombre SEPARATOR ', ')
+            FROM $t_al_c ac2
+            INNER JOIN $t_cur c2 ON c2.id = ac2.curso_id
+            WHERE {$curso_where})";
+        if ($modo === 'activos') {
+          $cg = (int) ($aula['curso_id'] ?? 0);
+          $curso_previo = $cg > 0
+            ? "(SELECT c2.nombre FROM $t_al_c ac2 INNER JOIN $t_cur c2 ON c2.id = ac2.curso_id WHERE ac2.alumno_id = a.id AND ac2.activo = 0 AND ac2.curso_id = $cg LIMIT 1)"
+            : 'NULL';
+          $cursos_baja = "(SELECT GROUP_CONCAT(DISTINCT c2.nombre ORDER BY c2.nombre SEPARATOR ', ')
+            FROM $t_al_c ac2
+            INNER JOIN $t_cur c2 ON c2.id = ac2.curso_id
+            WHERE ac2.alumno_id = a.id AND ac2.activo = 0)";
+          $curso_sql = "COALESCE({$curso_sql}, {$curso_previo}, {$cursos_baja})";
+        }
+      } else {
+        $curso_activo = $inactivos ? '' : ' AND c2.activo = 1';
+        $curso_sql = "(SELECT c2.nombre FROM $t_cur c2 WHERE c2.id = a.curso_id{$curso_activo} LIMIT 1)";
+      }
+
+      if ($modo === 'listas') {
+        $alumnos = self::alumnos_lista_desvinculados(
+          $aula_id,
+          (int) ($aula['curso_id'] ?? 0),
+          $sel_nombres,
+          $sel_apellidos,
+          $use_rel_a,
+          $use_rel_c
+        );
+      } else {
+      $alumno_activo = $inactivos ? 0 : 1;
+      $sql = "SELECT DISTINCT a.id,
+                {$sel_nombres} AS nombres,
+                {$sel_apellidos} AS apellidos,
+                a.ci,
+                {$curso_sql} AS curso_nombre
+              FROM $t_al a
+              WHERE a.activo = {$alumno_activo} AND (" . implode(' OR ', $membership) . ")
+              ORDER BY apellidos ASC, nombres ASC";
+      $alumnos = $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A) ?: [];
+      }
+
+      $curso_grupo = trim((string) ($aula['curso_grupo'] ?? ''));
+      $grupo_cea = class_exists('NC_Rest_Asistencia') && NC_Rest_Asistencia::grupo_es_cea_ingenieria($aula['aula_nombre'] ?? '');
+      foreach ($alumnos as &$row) {
+        $cn = trim((string) ($row['curso_nombre'] ?? ''));
+        if ($grupo_cea && ($cn === '' || strcasecmp($cn, 'CNA') === 0)) {
+          $row['curso_nombre'] = $curso_grupo !== '' ? $curso_grupo : 'CEA';
+          continue;
+        }
+        if ($cn === '' && $curso_grupo !== '') {
+          $row['curso_nombre'] = $curso_grupo;
+        }
+      }
+      unset($row);
+
+      self::generate_aula_lista_pdf($aula, $alumnos, $modo);
+      exit;
+    }
+
+    /**
+     * Alumnos que ya no tienen un curso activo, pero estuvieron en el grupo:
+     * figuraron en una lista de asistencia o el vínculo con el grupo quedó en baja.
+     */
+    private static function alumnos_lista_desvinculados(
+      int $aula_id,
+      int $curso_grupo_id,
+      string $sel_nombres,
+      string $sel_apellidos,
+      bool $use_rel_a,
+      bool $use_rel_c
+    ): array {
+      global $wpdb;
+      $t_al    = $wpdb->prefix . 'conducta_alumnos';
+      $t_cur   = $wpdb->prefix . 'conducta_cursos';
+      $t_al_c  = $wpdb->prefix . 'conducta_alumno_cursos';
+      $t_al_a  = $wpdb->prefix . 'conducta_alumno_aulas';
+      $t_asis  = $wpdb->prefix . 'conducta_asistencias';
+      $t_items = $wpdb->prefix . 'conducta_asistencia_items';
+
+      $tiene_asis = ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_asis) . "'") === $t_asis)
+        && ($wpdb->get_var("SHOW TABLES LIKE '" . $wpdb->esc_like($t_items) . "'") === $t_items);
+      $tiene_grupo_asis = $tiene_asis && self::table_has_column($t_asis, 'grupo_id');
+
+      $match_grupo = $tiene_grupo_asis
+        ? '(s.aula_id = %d OR s.grupo_id = %d)'
+        : 's.aula_id = %d';
+      $params_grupo = [$aula_id];
+      if ($tiene_grupo_asis) $params_grupo[] = $aula_id;
+
+      $vinculos = [];
+      $params_where = [];
+
+      if ($tiene_asis) {
+        $vinculos[] = "EXISTS (
+          SELECT 1 FROM $t_items i
+          INNER JOIN $t_asis s ON s.id = i.asistencia_id AND s.activo = 1
+          WHERE i.alumno_id = a.id AND {$match_grupo}
+        )";
+        $params_where = array_merge($params_where, $params_grupo);
+      }
+      if ($use_rel_a) {
+        $vinculos[] = "EXISTS (
+          SELECT 1 FROM $t_al_a ag
+          WHERE ag.alumno_id = a.id AND ag.aula_id = %d AND ag.activo = 0
+        )";
+        $params_where[] = $aula_id;
+      }
+      if (!$vinculos) return [];
+
+      $curso_lista = 'NULL';
+      $params_select = [];
+      if ($tiene_asis) {
+        $curso_lista = "(SELECT GROUP_CONCAT(DISTINCT cu.nombre ORDER BY cu.nombre SEPARATOR ', ')
+          FROM $t_items i
+          INNER JOIN $t_asis s ON s.id = i.asistencia_id AND s.activo = 1
+          INNER JOIN $t_cur cu ON cu.id = s.curso_id
+          WHERE i.alumno_id = a.id AND {$match_grupo})";
+        $params_select = $params_grupo;
+      }
+
+      $curso_baja = 'NULL';
+      if ($use_rel_c) {
+        $filtro_curso = $curso_grupo_id > 0 ? " AND ac.curso_id = $curso_grupo_id" : '';
+        $curso_baja = "(SELECT GROUP_CONCAT(DISTINCT cu.nombre ORDER BY cu.nombre SEPARATOR ', ')
+          FROM $t_al_c ac
+          INNER JOIN $t_cur cu ON cu.id = ac.curso_id
+          WHERE ac.alumno_id = a.id AND ac.activo = 0{$filtro_curso})";
+      }
+
+      if ($use_rel_c) {
+        $sin_curso = "NOT EXISTS (
+          SELECT 1 FROM $t_al_c ac
+          INNER JOIN $t_cur cu ON cu.id = ac.curso_id
+          WHERE ac.alumno_id = a.id AND ac.activo = 1 AND cu.activo = 1
+        )";
+      } else {
+        $sin_curso = '(a.curso_id IS NULL OR a.curso_id = 0)';
+      }
+
+      $sql = "SELECT DISTINCT a.id,
+                {$sel_nombres} AS nombres,
+                {$sel_apellidos} AS apellidos,
+                a.ci,
+                COALESCE({$curso_lista}, {$curso_baja}) AS curso_nombre
+              FROM $t_al a
+              WHERE (" . implode(' OR ', $vinculos) . ")
+                AND {$sin_curso}
+              ORDER BY apellidos ASC, nombres ASC";
+
+      $params = array_merge($params_select, $params_where);
+      return $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A) ?: [];
+    }
+
+    private static function generate_aula_lista_pdf(array $aula, array $alumnos, string $modo = 'activos'): void {
+      if (ob_get_level()) {
+        ob_end_clean();
+      }
+
+      $grupo = (string) ($aula['aula_nombre'] ?? '');
+      $curso = trim((string) ($aula['curso_grupo'] ?? ''));
+      $font = file_exists(NC_PATH . 'vendor/tecnickcom/tcpdf/fonts/dejavusans.php') ? 'dejavusans' : 'helvetica';
+
+      $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8');
+      $pdf->SetCreator('Newton OPM');
+      $pdf->SetTitle('Listado ' . $grupo);
+      $pdf->setPrintHeader(false);
+      $pdf->setPrintFooter(false);
+      $pdf->SetMargins(12, 12, 12);
+      $pdf->SetAutoPageBreak(true, 14);
+      $pdf->AddPage();
+
+      $titulos = [
+        'inactivos' => 'Listado de alumnos inactivos',
+        'listas' => 'Listado recuperado de listas',
+      ];
+      $estados = [
+        'inactivos' => 'Inactivos',
+        'listas' => 'Desvinculados del curso (según listas)',
+      ];
+      $titulo = $titulos[$modo] ?? 'Listado de alumnos';
+      $pdf->SetFont($font, 'B', 16);
+      $pdf->Cell(0, 9, $titulo, 0, 1, 'L');
+      $pdf->SetFont($font, '', 11);
+      $pdf->Cell(0, 6, 'Grupo: ' . $grupo, 0, 1, 'L');
+      if ($curso !== '') {
+        $pdf->Cell(0, 6, 'Curso: ' . $curso, 0, 1, 'L');
+      }
+      $pdf->Cell(0, 6, 'Estado: ' . ($estados[$modo] ?? 'Activos'), 0, 1, 'L');
+      $pdf->Cell(0, 6, 'Fecha: ' . date('d/m/Y'), 0, 1, 'L');
+      $pdf->Cell(0, 6, 'Total de alumnos: ' . count($alumnos), 0, 1, 'L');
+      $pdf->Ln(3);
+
+      $pdf->SetFont($font, '', 9);
+      if (!$alumnos) {
+        $vacios = [
+          'inactivos' => 'No hay alumnos inactivos en este grupo.',
+          'listas' => 'No hay alumnos desvinculados para reconstruir en este grupo.',
+        ];
+        $pdf->Cell(0, 8, $vacios[$modo] ?? 'No hay alumnos activos en este grupo.', 0, 1, 'L');
+      } else {
+        $html = '<table border="1" cellpadding="4">
+          <tr style="background-color:#1a73e8;color:#ffffff;font-weight:bold;">
+            <th width="8%" align="center">N°</th>
+            <th width="24%">Apellidos</th>
+            <th width="24%">Nombres</th>
+            <th width="16%">Cédula</th>
+            <th width="28%">Curso</th>
+          </tr>';
+        $n = 0;
+        foreach ($alumnos as $al) {
+          $n++;
+          $bg = ($n % 2 === 0) ? ' background-color:#f5f7fa;' : '';
+          $html .= '<tr style="' . $bg . '">
+            <td align="center">' . $n . '</td>
+            <td>' . htmlspecialchars((string) ($al['apellidos'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>
+            <td>' . htmlspecialchars((string) ($al['nombres'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>
+            <td>' . htmlspecialchars((string) ($al['ci'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>
+            <td>' . htmlspecialchars((string) ($al['curso_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>
+          </tr>';
+        }
+        $html .= '</table>';
+        $pdf->writeHTML($html, true, false, true, false, '');
+      }
+
+      $suffixes = ['inactivos' => '_inactivos', 'listas' => '_desvinculados'];
+      $suffix = $suffixes[$modo] ?? '';
+      $filename = 'lista_' . sanitize_file_name($grupo !== '' ? $grupo : 'grupo') . $suffix . '_' . date('Y-m-d') . '.pdf';
+      $pdf->Output($filename, 'D');
+    }
+
     public static function export_aula_csv(WP_REST_Request $req) {
       global $wpdb;
       $aula_id = (int)$req['id'];
